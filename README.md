@@ -1,7 +1,6 @@
 # Container Hardening Lab
 
-<!-- CI badge — update OWNER/REPO after pushing to GitHub -->
-<!-- ![CI](https://github.com/OWNER/container-hardening-lab/actions/workflows/ci.yml/badge.svg) -->
+[![CI](https://github.com/R055LE/container-hardening-lab/actions/workflows/ci.yml/badge.svg)](https://github.com/R055LE/container-hardening-lab/actions/workflows/ci.yml)
 
 A portfolio project demonstrating production-grade container hardening, vulnerability scanning, and policy-as-code enforcement — aligned with the [CIS Docker Benchmark](https://www.cisecurity.org/benchmark/docker) and [DoD Iron Bank](https://ironbank.dso.mil/) practices.
 
