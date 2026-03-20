@@ -84,7 +84,7 @@ jobs:
           set +e
           trivy image --severity CRITICAL,HIGH --exit-code 1 \
             --no-progress node:18 2>&1 | tee /tmp/trivy-node18.txt
-          EXIT=$?
+          EXIT=${PIPESTATUS[0]}
           set -e
           echo "trivy exit code: $EXIT"
           if [ "$EXIT" -eq 0 ]; then
@@ -140,7 +140,7 @@ jobs:
         run: make scan IMAGE=${{ matrix.image }}
 
       - name: Scan with Trivy (SARIF upload)
-        uses: aquasecurity/trivy-action@0.30.0
+        uses: aquasecurity/trivy-action@0.35.0
         with:
           image-ref: hardened-${{ matrix.image }}:latest
           format: sarif
