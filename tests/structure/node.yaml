@@ -1,0 +1,92 @@
+# tests/structure/node.yaml
+# Container structure tests for the hardened Node.js image.
+#
+# Run (after building the image):
+#   container-structure-test test \
+#     --image hardened-node:latest \
+#     --config tests/structure/node.yaml
+
+schemaVersion: "2.0.0"
+
+metadataTest:
+  user: "appuser"
+  exposedPorts:
+    - "3000"
+  labels:
+    - key: "org.opencontainers.image.title"
+      value: "hardened-node"
+    - key: "org.opencontainers.image.vendor"
+      value: "container-hardening-lab"
+
+commandTests:
+
+  - name: "runtime user is non-root (UID 10001)"
+    command: "id"
+    expectedOutput:
+      - "uid=10001"
+      - "gid=10001"
+    excludedOutput:
+      - "uid=0"
+
+  - name: "no SUID binaries present"
+    command: "sh"
+    args: ["-c", "find / -xdev -perm /4000 2>/dev/null | wc -l | tr -d ' \n'"]
+    expectedOutput:
+      - "^0$"
+
+  - name: "no SGID binaries present"
+    command: "sh"
+    args: ["-c", "find / -xdev -perm /2000 2>/dev/null | wc -l | tr -d ' \n'"]
+    expectedOutput:
+      - "^0$"
+
+  - name: "node is executable"
+    command: "node"
+    args: ["--version"]
+    expectedOutput:
+      - "^v20\\."
+
+  - name: "working directory is /app"
+    command: "sh"
+    args: ["-c", "pwd | tr -d '\n'"]
+    expectedOutput:
+      - "^/app$"
+
+  - name: "express is importable"
+    command: "node"
+    args: ["-e", "require('express'); process.stdout.write('ok')"]
+    expectedOutput:
+      - "^ok$"
+
+fileExistenceTests:
+
+  - name: "wget is not present"
+    path: "/usr/bin/wget"
+    shouldExist: false
+
+  - name: "curl is not present"
+    path: "/usr/bin/curl"
+    shouldExist: false
+
+  - name: "perl is not present"
+    path: "/usr/bin/perl"
+    shouldExist: false
+
+  - name: "src/index.js exists"
+    path: "/app/src/index.js"
+    shouldExist: true
+
+  - name: "node_modules/express exists"
+    path: "/app/node_modules/express"
+    shouldExist: true
+
+  - name: "/root/.ssh does not exist"
+    path: "/root/.ssh"
+    shouldExist: false
+
+fileContentTests:
+
+  - name: "appuser has nologin shell"
+    path: "/etc/passwd"
+    expectedContents:
+      - "appuser:.*:/sbin/nologin"

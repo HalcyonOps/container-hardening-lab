@@ -1,0 +1,15 @@
+# Explicitly sets runAsNonRoot: false — must be denied by disallow-root-user.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod-fail-runasnonroot-false
+  namespace: default
+spec:
+  containers:
+    - name: app
+      image: python:3.12-slim
+      securityContext:
+        runAsNonRoot: false
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]

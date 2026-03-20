@@ -1,0 +1,17 @@
+# Sets privileged: true — must be denied by disallow-privileged-containers.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod-fail-privileged
+  namespace: default
+spec:
+  containers:
+    - name: app
+      image: python:3.12-slim
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        allowPrivilegeEscalation: false
+        privileged: true
+        capabilities:
+          drop: ["ALL"]

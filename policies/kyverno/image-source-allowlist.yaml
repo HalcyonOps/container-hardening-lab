@@ -1,0 +1,81 @@
+# policies/kyverno/image-source-allowlist.yaml
+# Restrict container images to approved registries.
+#
+# Apply to a cluster:
+#   kubectl apply -f policies/kyverno/image-source-allowlist.yaml
+#
+# CIS Kubernetes Benchmark: 5.5.1
+# CIS Docker Benchmark: 4.2 / 4.3
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: restrict-image-registries
+  annotations:
+    policies.kyverno.io/title: Restrict Image Registries
+    policies.kyverno.io/category: Supply Chain Security
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: >-
+      Images must be pulled from approved registries to prevent use of
+      untrusted or malicious images. Update the allowedRegistries list
+      for your environment. In production, pin images to digests.
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: validate-image-registry
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      validate:
+        message: >-
+          CIS 4.2: Image '{{ element.image }}' does not come from an approved
+          registry. Allowed registries: docker.io/library, gcr.io/distroless,
+          cgr.dev/chainguard, registry1.dso.mil, public.ecr.aws, ghcr.io.
+        foreach:
+          - list: "request.object.spec.containers + request.object.spec.initContainers + (request.object.spec.ephemeralContainers || `[]`)"
+            deny:
+              conditions:
+                all:
+                  # Deny if image does not start with any approved prefix
+                  - key: "{{ element.image }}"
+                    operator: AnyNotIn
+                    value:
+                      - "docker.io/library/*"
+                      - "library/*"
+                      - "python:*"
+                      - "node:*"
+                      - "nginx:*"
+                      - "gcr.io/distroless/*"
+                      - "cgr.dev/chainguard/*"
+                      - "registry1.dso.mil/*"
+                      - "public.ecr.aws/*"
+                      - "ghcr.io/*"
+
+    # -------------------------------------------------------------------------
+    # Warn (Audit): images not pinned to a digest
+    # -------------------------------------------------------------------------
+    - name: warn-image-not-pinned
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      validate:
+        message: >-
+          Image '{{ element.image }}' is not pinned to a digest (@sha256:...).
+          Pin images in production for reproducible and tamper-evident deploys.
+        foreach:
+          - list: "request.object.spec.containers + request.object.spec.initContainers + (request.object.spec.ephemeralContainers || `[]`)"
+            deny:
+              conditions:
+                all:
+                  - key: "{{ contains(element.image, '@sha256:') }}"
+                    operator: Equals
+                    value: false
+      # Audit mode — warn but don't block unpinned images (change to Enforce in production)
+      # Override at the rule level:
+      # validationFailureAction: Audit

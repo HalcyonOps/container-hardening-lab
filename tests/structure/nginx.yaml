@@ -1,0 +1,87 @@
+# tests/structure/nginx.yaml
+# Container structure tests for the hardened nginx image.
+#
+# Run (after building the image):
+#   container-structure-test test \
+#     --image hardened-nginx:latest \
+#     --config tests/structure/nginx.yaml
+
+schemaVersion: "2.0.0"
+
+metadataTest:
+  user: "nginx"
+  exposedPorts:
+    - "8080"
+  labels:
+    - key: "org.opencontainers.image.title"
+      value: "hardened-nginx"
+    - key: "org.opencontainers.image.vendor"
+      value: "container-hardening-lab"
+
+commandTests:
+
+  - name: "runtime user is non-root (UID 101)"
+    command: "id"
+    expectedOutput:
+      - "uid=101"
+    excludedOutput:
+      - "uid=0"
+
+  - name: "no SUID binaries present"
+    command: "sh"
+    args: ["-c", "find / -xdev -perm /4000 2>/dev/null | wc -l | tr -d ' \n'"]
+    expectedOutput:
+      - "^0$"
+
+  - name: "no SGID binaries present"
+    command: "sh"
+    args: ["-c", "find / -xdev -perm /2000 2>/dev/null | wc -l | tr -d ' \n'"]
+    expectedOutput:
+      - "^0$"
+
+  - name: "nginx config sets server_tokens off"
+    command: "sh"
+    args: ["-c", "grep -c 'server_tokens off' /etc/nginx/nginx.conf | tr -d ' \n'"]
+    expectedOutput:
+      - "^[1-9]"
+
+  - name: "nginx config binds to port 8080"
+    command: "sh"
+    args: ["-c", "grep -c 'listen 8080' /etc/nginx/nginx.conf | tr -d ' \n'"]
+    expectedOutput:
+      - "^[1-9]"
+
+fileExistenceTests:
+
+  - name: "wget is not present"
+    path: "/usr/bin/wget"
+    shouldExist: false
+
+  - name: "curl is not present"
+    path: "/usr/bin/curl"
+    shouldExist: false
+
+  - name: "index.html is served"
+    path: "/usr/share/nginx/html/index.html"
+    shouldExist: true
+
+  - name: "/root/.ssh does not exist"
+    path: "/root/.ssh"
+    shouldExist: false
+
+fileContentTests:
+
+  - name: "index.html contains expected title"
+    path: "/usr/share/nginx/html/index.html"
+    expectedContents:
+      - "Container Hardening Lab"
+
+  - name: "nginx.conf has X-Frame-Options header"
+    path: "/etc/nginx/nginx.conf"
+    expectedContents:
+      - "X-Frame-Options"
+
+  - name: "nginx.conf has Content-Security-Policy header"
+    path: "/etc/nginx/nginx.conf"
+    expectedContents:
+      - "Content-Security-Policy"

@@ -1,0 +1,44 @@
+# images/python/.dockerignore
+# Prevents secrets, dev tooling, and repo metadata from leaking into the
+# build context. Docker sends everything not listed here to the daemon —
+# even files never referenced by a COPY instruction are reachable via
+# BuildKit cache mounts and can be extracted from intermediate layers.
+
+# Version control
+.git
+.gitignore
+
+# CI / repo metadata
+.github
+*.md
+
+# Local development overrides
+.env
+.env.*
+*.local
+docker-compose*.yml
+
+# Python dev artefacts — only requirements.txt and app/ are needed
+__pycache__
+*.py[cod]
+*.pyo
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov
+dist
+build
+*.egg-info
+
+# Test fixtures and reports (never go in the image)
+tests
+reports
+
+# Editor / OS noise
+.DS_Store
+.idea
+.vscode
+*.swp
+*.swo
+Thumbs.db

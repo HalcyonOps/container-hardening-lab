@@ -1,0 +1,191 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+permissions:
+  contents: read
+  security-events: write   # required for uploading SARIF to GitHub Security tab
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Job 1: Policy tests — no Docker required, fast feedback on every push.
+  # ---------------------------------------------------------------------------
+  policy-tests:
+    name: Policy tests (OPA + Kyverno)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install OPA
+        run: |
+          curl -sL https://openpolicyagent.org/downloads/v0.70.0/opa_linux_amd64_static \
+            -o /usr/local/bin/opa
+          chmod +x /usr/local/bin/opa
+          opa version
+
+      - name: Install Kyverno CLI
+        run: |
+          curl -sL https://github.com/kyverno/kyverno/releases/download/v1.17.1/kyverno-cli_v1.17.1_linux_x86_64.tar.gz \
+            | tar xz -C /tmp kyverno && mv /tmp/kyverno /usr/local/bin/kyverno
+          kyverno version
+
+      - name: OPA unit tests
+        run: make test-opa
+
+      - name: Kyverno policy tests
+        run: make test-kyverno
+
+  # ---------------------------------------------------------------------------
+  # Job 2: Failure demo — show that the scanner and linter correctly reject
+  # a deliberately insecure Dockerfile and a known-vulnerable base image.
+  # This job is expected to produce findings; it documents the failure path.
+  # ---------------------------------------------------------------------------
+  failure-demo:
+    name: Failure demo (unhardened)
+    runs-on: ubuntu-latest
+    needs: policy-tests
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Conftest
+        run: |
+          curl -sL https://github.com/open-policy-agent/conftest/releases/download/v0.57.0/conftest_0.57.0_Linux_x86_64.tar.gz \
+            | tar xz -C /usr/local/bin conftest
+          conftest --version
+
+      # Conftest MUST find violations — exit 0 from conftest means no violations,
+      # which would mean our policies aren't working.
+      - name: OPA lint rejects unhardened Dockerfile
+        run: |
+          set +e
+          conftest test examples/unhardened/Dockerfile \
+            --policy policies/opa/ \
+            --namespace docker.security
+          EXIT=$?
+          set -e
+          echo "conftest exit code: $EXIT"
+          if [ "$EXIT" -eq 0 ]; then
+            echo "ERROR: conftest found no violations in the unhardened Dockerfile — policies are not working."
+            exit 1
+          fi
+          echo "PASS: conftest correctly rejected the unhardened Dockerfile."
+
+      # Trivy scans the upstream node:18 base directly (no build needed).
+      # We assert findings ARE present; a clean scan would mean the demo is broken.
+      - name: Trivy finds CVEs in node:18 base image
+        run: |
+          curl -sL https://github.com/aquasecurity/trivy/releases/download/v0.69.3/trivy_0.69.3_Linux-64bit.tar.gz \
+            | tar xz -C /usr/local/bin trivy
+          set +e
+          trivy image --severity CRITICAL,HIGH --exit-code 1 \
+            --no-progress node:18 2>&1 | tee /tmp/trivy-node18.txt
+          EXIT=$?
+          set -e
+          echo "trivy exit code: $EXIT"
+          if [ "$EXIT" -eq 0 ]; then
+            echo "ERROR: Trivy found no CRITICAL/HIGH CVEs in node:18 — demo baseline is unexpectedly clean."
+            exit 1
+          fi
+          echo "PASS: Trivy correctly found CVEs in node:18."
+
+  # ---------------------------------------------------------------------------
+  # Job 3: Image pipeline — build, lint, scan, SBOM, structure test.
+  # Only runs after policy-tests passes.
+  # ---------------------------------------------------------------------------
+  image-pipeline:
+    name: Image pipeline (${{ matrix.image }})
+    runs-on: ubuntu-latest
+    needs: policy-tests
+
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [python, node, nginx]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # -----------------------------------------------------------------------
+      # Dockerfile lint via Conftest / OPA
+      # -----------------------------------------------------------------------
+      - name: Install Conftest
+        run: |
+          curl -sL https://github.com/open-policy-agent/conftest/releases/download/v0.57.0/conftest_0.57.0_Linux_x86_64.tar.gz \
+            | tar xz -C /usr/local/bin conftest
+          conftest --version
+
+      - name: Lint Dockerfile (OPA policies)
+        run: make lint IMAGE=${{ matrix.image }}
+
+      # -----------------------------------------------------------------------
+      # Build
+      # -----------------------------------------------------------------------
+      - name: Build image
+        run: make build IMAGE=${{ matrix.image }}
+
+      # -----------------------------------------------------------------------
+      # Trivy vulnerability scan
+      # Primary gate: make scan exits non-zero on CRITICAL/HIGH CVEs.
+      # Secondary: trivy-action uploads SARIF to GitHub Security tab.
+      # -----------------------------------------------------------------------
+      - name: Scan with Trivy (gate)
+        run: make scan IMAGE=${{ matrix.image }}
+
+      - name: Scan with Trivy (SARIF upload)
+        uses: aquasecurity/trivy-action@0.30.0
+        with:
+          image-ref: hardened-${{ matrix.image }}:latest
+          format: sarif
+          output: reports/${{ matrix.image }}/trivy.sarif
+          severity: CRITICAL,HIGH
+          exit-code: "0"
+        env:
+          TRIVY_DB_REPOSITORY: mirror.gcr.io/aquasec/trivy-db:2
+
+      - name: Upload Trivy SARIF to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: reports/${{ matrix.image }}/trivy.sarif
+          category: trivy-${{ matrix.image }}
+
+      # -----------------------------------------------------------------------
+      # SBOM generation
+      # -----------------------------------------------------------------------
+      - name: Install Syft
+        uses: anchore/sbom-action/download-syft@v0
+
+      - name: Generate SBOM
+        run: make sbom IMAGE=${{ matrix.image }}
+
+      # -----------------------------------------------------------------------
+      # Container structure tests
+      # -----------------------------------------------------------------------
+      - name: Install container-structure-test
+        run: |
+          curl -sL https://github.com/GoogleContainerTools/container-structure-test/releases/download/v1.19.3/container-structure-test-linux-amd64 \
+            -o /usr/local/bin/container-structure-test
+          chmod +x /usr/local/bin/container-structure-test
+          container-structure-test version
+
+      - name: Run structure tests
+        run: make test-structure IMAGE=${{ matrix.image }}
+
+      # -----------------------------------------------------------------------
+      # Upload all reports as a build artifact
+      # -----------------------------------------------------------------------
+      - name: Upload reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: security-reports-${{ matrix.image }}
+          path: reports/${{ matrix.image }}/
+          retention-days: 30

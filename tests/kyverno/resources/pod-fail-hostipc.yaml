@@ -1,0 +1,18 @@
+# Sets hostIPC: true — must be denied by deny-host-namespaces.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod-fail-hostipc
+  namespace: default
+spec:
+  hostIPC: true
+  containers:
+    - name: app
+      image: python:3.12-slim
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        allowPrivilegeEscalation: false
+        privileged: false
+        capabilities:
+          drop: ["ALL"]

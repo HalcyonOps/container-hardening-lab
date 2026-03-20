@@ -1,0 +1,17 @@
+# Generated at runtime by make scan / make sbom — never commit scan results
+reports/
+
+# node_modules from local dev (node image has its own inside Docker)
+node_modules/
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Editor / OS noise
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+Thumbs.db

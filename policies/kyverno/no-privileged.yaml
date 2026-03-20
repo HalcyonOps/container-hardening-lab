@@ -1,0 +1,96 @@
+# policies/kyverno/no-privileged.yaml
+# Enforce that Pods do not use privileged containers.
+#
+# Apply to a cluster:
+#   kubectl apply -f policies/kyverno/no-privileged.yaml
+#
+# CIS Kubernetes Benchmark: 5.2.1
+# CIS Docker Benchmark: 5.4
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: disallow-privileged-containers
+  annotations:
+    policies.kyverno.io/title: Disallow Privileged Containers
+    policies.kyverno.io/category: Pod Security Standards (Baseline)
+    policies.kyverno.io/severity: critical
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: >-
+      Privileged containers share the host's kernel namespaces and have
+      unrestricted device access, equivalent to running as root on the node.
+      This policy denies privileged: true and enforces that all capabilities
+      are dropped.
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    # -------------------------------------------------------------------------
+    # Rule 1: deny privileged: true in any container
+    # Uses top-level validate.deny with JMESPath array projection so that
+    # kyverno test evaluates it correctly (foreach.deny is not tested by CLI).
+    # -------------------------------------------------------------------------
+    - name: deny-privileged
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      validate:
+        message: >-
+          CIS 5.4: securityContext.privileged must not be set to true.
+          Privileged containers are not permitted.
+        deny:
+          conditions:
+            any:
+              - key: "{{ request.object.spec.containers[].securityContext.privileged }}"
+                operator: AnyIn
+                value:
+                  - true
+
+    # -------------------------------------------------------------------------
+    # Rule 2: require ALL capabilities dropped in every container
+    # validate.pattern checks each element of the containers array
+    # against the pattern, enforcing the constraint per-container.
+    # -------------------------------------------------------------------------
+    - name: require-drop-all-capabilities
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      validate:
+        message: >-
+          CIS 5.4 / PSS Restricted: All Linux capabilities must be dropped.
+          Set securityContext.capabilities.drop to include "ALL".
+        pattern:
+          spec:
+            containers:
+              - securityContext:
+                  capabilities:
+                    drop: "ALL | *ALL*"
+
+    # -------------------------------------------------------------------------
+    # Rule 3: deny hostPID, hostIPC, hostNetwork
+    # -------------------------------------------------------------------------
+    - name: deny-host-namespaces
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      validate:
+        message: >-
+          CIS 5.2 / 5.3: hostPID, hostIPC, and hostNetwork must not be set to true.
+        deny:
+          conditions:
+            any:
+              - key: "{{ request.object.spec.hostPID || `false` }}"
+                operator: Equals
+                value: true
+              - key: "{{ request.object.spec.hostIPC || `false` }}"
+                operator: Equals
+                value: true
+              - key: "{{ request.object.spec.hostNetwork || `false` }}"
+                operator: Equals
+                value: true

@@ -1,0 +1,16 @@
+# Sets allowPrivilegeEscalation: true — must be denied by disallow-root-user rule 2.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod-fail-privilege-escalation
+  namespace: default
+spec:
+  containers:
+    - name: app
+      image: python:3.12-slim
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        allowPrivilegeEscalation: true
+        capabilities:
+          drop: ["ALL"]

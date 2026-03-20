@@ -1,0 +1,6 @@
+# .trivyignore — nginx image
+# Format: CVE-ID  [expiry-date]  # reason
+#
+# Add accepted/deferred CVEs here with a justification comment and optional
+# expiry date (YYYY-MM-DD). Entries without an expiry must be reviewed
+# quarterly. Never suppress CRITICAL CVEs without an approved exception.

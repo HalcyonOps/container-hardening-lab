@@ -1,0 +1,39 @@
+# images/nginx/.dockerignore
+
+# Version control
+.git
+.gitignore
+
+# CI / repo metadata
+.github
+*.md
+
+# Local development overrides
+.env
+.env.*
+*.local
+docker-compose*.yml
+
+# Node dev artefacts from the builder stage (node_modules installed inside
+# the container, not copied from host — keep the lock files, exclude the rest)
+node_modules
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
+.yarn
+
+# Source files that are never needed in the nginx final image
+# (only dist/ is copied from builder stage, and that's built inside Docker)
+src
+tests
+coverage
+reports
+
+# Editor / OS noise
+.DS_Store
+.idea
+.vscode
+*.swp
+*.swo
+Thumbs.db

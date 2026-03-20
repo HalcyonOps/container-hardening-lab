@@ -1,0 +1,44 @@
+# images/node/.dockerignore
+
+# Version control
+.git
+.gitignore
+
+# CI / repo metadata
+.github
+*.md
+
+# Local development overrides
+.env
+.env.*
+*.local
+docker-compose*.yml
+
+# Node dev artefacts — only package.json, package-lock.json, and src/ are needed
+node_modules
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
+.yarn
+
+# Build outputs (built in the builder stage, not sent from host)
+dist
+build
+out
+.next
+.nuxt
+
+# Test fixtures and reports
+tests
+coverage
+.nyc_output
+reports
+
+# Editor / OS noise
+.DS_Store
+.idea
+.vscode
+*.swp
+*.swo
+Thumbs.db

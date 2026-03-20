@@ -1,0 +1,3 @@
+# Application dependencies
+# This file is intentionally minimal for the reference hardening example.
+# Replace with your actual application dependencies.

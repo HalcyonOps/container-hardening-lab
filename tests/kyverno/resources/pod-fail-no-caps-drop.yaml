@@ -1,0 +1,16 @@
+# No capabilities.drop — must be denied by require-drop-all-capabilities.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod-fail-no-caps-drop
+  namespace: default
+spec:
+  containers:
+    - name: app
+      image: python:3.12-slim
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        allowPrivilegeEscalation: false
+        privileged: false
+        # capabilities not set at all

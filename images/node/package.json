@@ -1,0 +1,15 @@
+{
+  "name": "hardened-node-app",
+  "version": "1.0.0",
+  "description": "Reference application for the hardened Node.js 20 image",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

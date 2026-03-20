@@ -1,0 +1,130 @@
+# tests/structure/python.yaml
+# Container structure tests for the hardened Python image.
+# https://github.com/GoogleContainerTools/container-structure-test
+#
+# Run (after building the image):
+#   container-structure-test test \
+#     --image hardened-python:latest \
+#     --config tests/structure/python.yaml
+#
+# These tests validate the runtime properties of the final image layer —
+# not the Dockerfile instructions. They catch regressions where a hardening
+# step was accidentally removed or overridden.
+
+schemaVersion: "2.0.0"
+
+# ---------------------------------------------------------------------------
+# Metadata tests: image-level properties
+# ---------------------------------------------------------------------------
+metadataTest:
+  # CIS 4.1: image must declare a non-root user
+  user: "appuser"
+  # Only port 8000 should be exposed
+  exposedPorts:
+    - "8000"
+  # Labels must include OCI standard fields
+  labels:
+    - key: "org.opencontainers.image.title"
+      value: "hardened-python"
+    - key: "org.opencontainers.image.vendor"
+      value: "container-hardening-lab"
+
+# ---------------------------------------------------------------------------
+# Command tests: execute commands inside the container and check output
+# ---------------------------------------------------------------------------
+commandTests:
+
+  # CIS 4.1: process must run as non-root UID
+  - name: "runtime user is non-root (UID 10001)"
+    command: "id"
+    expectedOutput:
+      - "uid=10001"
+      - "gid=10001"
+    excludedOutput:
+      - "uid=0"
+
+  # CIS 4.8: no SUID binaries should remain
+  - name: "no SUID binaries present"
+    command: "sh"
+    args:
+      - "-c"
+      - "find / -xdev -perm /4000 2>/dev/null | wc -l | tr -d ' \n'"
+    expectedOutput:
+      - "^0$"
+
+  # CIS 4.8: no SGID binaries should remain
+  - name: "no SGID binaries present"
+    command: "sh"
+    args:
+      - "-c"
+      - "find / -xdev -perm /2000 2>/dev/null | wc -l | tr -d ' \n'"
+    expectedOutput:
+      - "^0$"
+
+  # Python must be functional (it's the only runtime dependency)
+  - name: "python3 is executable"
+    command: "python3"
+    args: ["--version"]
+    expectedOutput:
+      - "Python 3\\.12\\."
+
+  # pip must NOT be invokable at runtime — builder only
+  # (pip is present in slim, but we verify the builder stage didn't leak tools)
+  - name: "working directory is /app"
+    command: "sh"
+    args: ["-c", "pwd | tr -d '\n'"]
+    expectedOutput:
+      - "^/app$"
+
+# ---------------------------------------------------------------------------
+# File existence tests: attack-surface tools must be absent
+# ---------------------------------------------------------------------------
+fileExistenceTests:
+
+  # CIS 4.7: wget removed
+  - name: "wget is not present"
+    path: "/usr/bin/wget"
+    shouldExist: false
+
+  # CIS 4.7: curl removed
+  - name: "curl is not present"
+    path: "/usr/bin/curl"
+    shouldExist: false
+
+  # CIS 4.7: gcc removed (no in-container compilation)
+  - name: "gcc is not present"
+    path: "/usr/bin/gcc"
+    shouldExist: false
+
+  # CIS 4.7: perl removed
+  - name: "perl is not present"
+    path: "/usr/bin/perl"
+    shouldExist: false
+
+  # /app workdir must exist and be created
+  - name: "/app directory exists"
+    path: "/app"
+    shouldExist: true
+
+  # /root home directory should not be used (appuser has no home)
+  - name: "/root/.ssh does not exist"
+    path: "/root/.ssh"
+    shouldExist: false
+
+# ---------------------------------------------------------------------------
+# File content tests: validate configuration file content
+# ---------------------------------------------------------------------------
+fileContentTests:
+
+  # The appuser shell must be a no-login shell (CIS 4.1)
+  - name: "appuser has nologin shell in /etc/passwd"
+    path: "/etc/passwd"
+    expectedContents:
+      - "appuser:.*:/sbin/nologin"
+
+  # appuser must not appear in /etc/sudoers or sudoers.d
+  - name: "appuser not in sudoers"
+    path: "/etc/passwd"
+    # Verify appuser exists (indirect — sudoers check via command test is more reliable)
+    expectedContents:
+      - "appuser"

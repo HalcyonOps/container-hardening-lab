@@ -1,0 +1,19 @@
+# A fully hardened Pod that should pass all policies.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod-pass-hardened
+  namespace: default
+spec:
+  containers:
+    - name: app
+      image: python:3.12-slim
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        allowPrivilegeEscalation: false
+        privileged: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: ["ALL"]
