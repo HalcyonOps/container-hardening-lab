@@ -1,4 +1,37 @@
-# Explicitly sets runAsNonRoot: false — must be denied by disallow-root-user.
+# pod-fail-runasnonroot-false.yaml — Explicit opt-out of non-root enforcement
+#
+# Violation: runAsNonRoot: false
+# Policy:    no-root.yaml → deny-root-user (rule 1, second condition)
+# CIS:       CIS Kubernetes Benchmark 5.2.6
+#
+# This fixture tests the explicit opt-out from non-root enforcement.
+# runAsNonRoot: false means: "I don't care if this container runs as root."
+# Combined with an image that has no USER instruction, this guarantees the
+# container starts as UID 0.
+#
+# The difference between this fixture and pod-fail-runasroot.yaml:
+#
+#   pod-fail-runasroot.yaml:         runAsUser: 0           (explicit UID 0)
+#   pod-fail-runasnonroot-false.yaml: runAsNonRoot: false   (opt-out of the guard)
+#
+# Both must be denied. runAsNonRoot: false is arguably more dangerous because it
+# is easy to write by accident — a developer who wants to disable the
+# "container refused to start" error might set runAsNonRoot: false without
+# understanding that they are allowing root.
+#
+# How the policy catches this:
+#   The deny-root-user rule in no-root.yaml uses two conditions joined by `any`:
+#   1. AnyIn [0] on the projected runAsUser array  → catches explicit UID 0
+#   2. AnyIn [false] on the projected runAsNonRoot array → catches this case
+#
+#   The `any` join means the Pod is denied if EITHER condition is true.
+#   This fixture triggers condition 2 only. The test assertion should be fail/deny.
+#
+# Note: no runAsUser is set in this fixture. The policy does not require
+# runAsUser to be present — it requires that the container is not root.
+# If runAsNonRoot: false is removed and runAsUser is also absent, the
+# container runtime falls back to the image's USER. A hardened image with
+# USER 10001 would pass; an image without USER would run as root.
 apiVersion: v1
 kind: Pod
 metadata:

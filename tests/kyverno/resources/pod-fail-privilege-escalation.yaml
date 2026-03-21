@@ -1,4 +1,39 @@
-# Sets allowPrivilegeEscalation: true — must be denied by disallow-root-user rule 2.
+# pod-fail-privilege-escalation.yaml — Privilege escalation enabled
+#
+# Violation: allowPrivilegeEscalation: true
+# Policy:    no-root.yaml → deny-privilege-escalation (rule 2)
+# CIS:       CIS Kubernetes Benchmark 5.2.5
+#
+# allowPrivilegeEscalation controls whether a process can gain more privileges
+# than its parent process. When set to true (or left unset, which defaults to
+# true in Kubernetes), a non-root process can use system calls or SUID binaries
+# to acquire root privileges at runtime — even if runAsUser is set to a
+# non-zero UID.
+#
+# Concrete attack path this enables:
+#   1. The container starts as UID 10001 (non-root) — passes the root check
+#   2. The image contains a SUID binary (e.g. /usr/bin/su, /usr/bin/sudo,
+#      or a custom binary with the SUID bit set)
+#   3. An attacker who achieves code execution runs the SUID binary
+#   4. The binary executes as its owner (root) — the attacker is now root
+#      inside the container despite starting as UID 10001
+#
+# Why this is a separate policy rule from the root check:
+#   A container can satisfy runAsNonRoot: true AND runAsUser: 10001 and still
+#   be vulnerable if allowPrivilegeEscalation: true. The two checks are
+#   complementary: one prevents starting as root, the other prevents becoming
+#   root after startup. Both are required for a complete non-root guarantee.
+#
+# Linux mechanism: PR_SET_NO_NEW_PRIVS
+#   Setting allowPrivilegeEscalation: false causes the container runtime to
+#   call prctl(PR_SET_NO_NEW_PRIVS, 1) on the process. This flag is inherited
+#   by all child processes and cannot be unset. It causes execve() to not grant
+#   elevated privileges from SUID/SGID bits or file capabilities.
+#
+# This fixture is correct except for allowPrivilegeEscalation: true.
+# runAsUser and runAsNonRoot are not set here — the policy being tested
+# (rule 2) is independent of them. Testing one violation per fixture makes
+# it easy to confirm that the correct rule fired.
 apiVersion: v1
 kind: Pod
 metadata:

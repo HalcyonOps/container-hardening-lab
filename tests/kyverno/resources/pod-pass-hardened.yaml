@@ -1,4 +1,52 @@
-# A fully hardened Pod that should pass all policies.
+# pod-pass-hardened.yaml — The reference "gold standard" Pod
+#
+# This fixture is the positive test case: a Pod that satisfies every rule in
+# both Kyverno policies (no-root.yaml and no-privileged.yaml). All 6 of the
+# security fields checked by the policies are present and set correctly.
+#
+# How this fixture is used:
+#   kyverno-test.yaml references this file and expects result: pass for every
+#   policy rule. If a policy change causes this Pod to be denied, the test
+#   suite immediately flags it as a regression — you tightened a rule too far
+#   or changed a field name.
+#
+# Field-by-field rationale:
+#
+#   runAsNonRoot: true
+#     Instructs the container runtime to refuse to start the container if the
+#     image's default user (the USER set in the Dockerfile or the image metadata)
+#     resolves to UID 0. This is a belt-and-suspenders check on top of runAsUser.
+#
+#   runAsUser: 10001 / runAsGroup: 10001
+#     Explicitly sets the UID and GID for the process inside the container.
+#     10001 is chosen because it is above the system-reserved range (0–999) and
+#     the common user-space range (1000–9999 on many distros), making it
+#     unlikely to collide with any OS-managed account inside the image. The
+#     matching UID is used in the hardened Dockerfiles (USER 10001).
+#
+#   allowPrivilegeEscalation: false
+#     Prevents the process from gaining more privileges than its parent. Without
+#     this, a process can call setuid() or use SUID binaries to become root even
+#     if it started as a non-root user. Setting this to false is equivalent to
+#     setting the PR_SET_NO_NEW_PRIVS flag on the Linux process.
+#
+#   privileged: false
+#     Explicitly disables privileged mode (which would grant near-root access to
+#     the host). Redundant alongside allowPrivilegeEscalation: false for most
+#     workloads, but explicit is better than implicit in a security manifest.
+#
+#   readOnlyRootFilesystem: true
+#     Mounts the container's root filesystem as read-only. Any process that
+#     achieves code execution inside the container cannot write to the
+#     filesystem — cannot drop a reverse shell binary, cannot modify application
+#     files, cannot write to /tmp without an explicit emptyDir volume. Reduces
+#     the blast radius of a compromise significantly.
+#
+#   capabilities.drop: ["ALL"]
+#     Drops all Linux capabilities that Kubernetes grants by default. The default
+#     set includes NET_BIND_SERVICE, CHOWN, SETUID, SETGID, and others that
+#     application code rarely needs. Starting from zero and adding back only
+#     what is needed is the principle of least privilege applied to capabilities.
 apiVersion: v1
 kind: Pod
 metadata:

@@ -1,4 +1,39 @@
-# Sets hostIPC: true — must be denied by deny-host-namespaces.
+# pod-fail-hostipc.yaml — Host IPC namespace sharing
+#
+# Violation: hostIPC: true
+# Policy:    no-privileged.yaml → deny-host-namespaces (rule 3, condition 2)
+# CIS:       CIS Kubernetes Benchmark 5.2.3
+#
+# hostIPC: true gives the container access to the host's inter-process
+# communication namespace, which includes:
+#
+#   Shared memory segments (shmget / shmat):
+#     Processes use shared memory for high-throughput data transfer between
+#     processes on the same host. Databases (PostgreSQL, MySQL) and message
+#     queues often use shared memory for IPC. A container with hostIPC: true
+#     can read and write shared memory segments created by any host process.
+#
+#   Message queues (msgget / msgsnd / msgrcv):
+#     System-level message queues used for inter-process signalling. A
+#     container with hostIPC access can read messages intended for other
+#     processes or inject messages into the queue.
+#
+#   Semaphores (semget / semop):
+#     Coordination primitives used to synchronise access to shared resources.
+#     Manipulating semaphores can cause denial-of-service against processes
+#     that rely on them for coordination.
+#
+# Real-world relevance:
+#   Database connection poolers (PgBouncer, ProxySQL) and caching layers
+#   sometimes use POSIX shared memory for internal state. An attacker with
+#   hostIPC access in a co-located pod could read connection state, active
+#   queries, or cached credentials.
+#
+# Like hostPID, hostIPC is a Pod-level setting that applies to all containers
+# simultaneously. There is no per-container equivalent. The Kyverno policy
+# checks spec.hostIPC directly using a JMESPath condition with a `|| \`false\``
+# fallback — an absent hostIPC field resolves to false and does not trigger
+# the rule. Only an explicit hostIPC: true triggers the deny.
 apiVersion: v1
 kind: Pod
 metadata:

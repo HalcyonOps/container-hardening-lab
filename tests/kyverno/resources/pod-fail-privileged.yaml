@@ -1,4 +1,38 @@
-# Sets privileged: true — must be denied by disallow-privileged-containers.
+# pod-fail-privileged.yaml — Privileged mode enabled
+#
+# Violation: privileged: true
+# Policy:    no-privileged.yaml → deny-privileged (rule 1)
+# CIS:       CIS Kubernetes Benchmark 5.2.1 / CIS Docker Benchmark 5.4
+#
+# securityContext.privileged: true is the most dangerous single flag in a Pod
+# manifest. A privileged container runs with almost all Linux capabilities
+# enabled and has near-unrestricted access to the host kernel, devices, and
+# namespaces. It is the container equivalent of running a process as root on
+# the bare host.
+#
+# What privileged: true grants:
+#   - All ~40 Linux capabilities (vs the ~14 granted by default)
+#   - Direct access to /dev — can read/write block devices, memory, etc.
+#   - Ability to load and unload kernel modules (insmod/rmmod)
+#   - Ability to modify the host's network interfaces and routing tables
+#   - Access to /proc/sysrq-trigger — can crash or reboot the node
+#   - Ability to mount the host filesystem (mount /dev/sda1 /mnt)
+#   - Effective bypass of seccomp and AppArmor profiles
+#
+# In practice, privileged: true in a Pod is a node compromise waiting to
+# happen. Attackers with code execution inside a privileged container can
+# escape to the node in minutes using well-documented techniques.
+#
+# Legitimate uses: almost none in application workloads. CNI plugins (Calico,
+# Cilium), device plugins (NVIDIA GPU driver), and system daemons (fluentd
+# with host log access) sometimes require elevated privileges. These should
+# be isolated via Kyverno PolicyExceptions or namespace-scoped exemptions,
+# not by relaxing this policy globally.
+#
+# This fixture is correct in every other respect — runAsNonRoot, runAsUser,
+# allowPrivilegeEscalation, and capabilities.drop are all hardened. The single
+# violation is privileged: true. The test assertion is fail/deny on the
+# deny-privileged rule in no-privileged.yaml.
 apiVersion: v1
 kind: Pod
 metadata:

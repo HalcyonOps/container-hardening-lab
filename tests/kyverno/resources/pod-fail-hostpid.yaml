@@ -1,4 +1,41 @@
-# Sets hostPID: true — must be denied by deny-host-namespaces.
+# pod-fail-hostpid.yaml — Host PID namespace sharing
+#
+# Violation: hostPID: true
+# Policy:    no-privileged.yaml → deny-host-namespaces (rule 3, condition 1)
+# CIS:       CIS Kubernetes Benchmark 5.2.2
+#
+# hostPID: true gives the container visibility into every process running on
+# the host node, not just processes inside the container. The container can
+# read /proc/<pid>/ for any host process — including other pods on the same
+# node, system daemons, and the kubelet itself.
+#
+# Attack paths enabled by hostPID: true:
+#
+#   Process enumeration:
+#     ls /proc/ inside the container reveals PIDs of all host processes.
+#     An attacker can identify which databases, credential stores, or
+#     sensitive services are running and target them.
+#
+#   Memory reads via /proc/<pid>/mem:
+#     /proc/<pid>/mem allows reading the virtual memory of another process.
+#     With the right offsets, an attacker can extract secrets, tokens, or
+#     cryptographic keys from running processes — including the kubelet,
+#     which holds the node's service account token.
+#
+#   Signal injection:
+#     /proc/<pid>/status reveals the PID; kill() can send signals to any
+#     host process. This enables denial-of-service against system daemons
+#     (SIGKILL to containerd, for example, would affect all pods on the node).
+#
+#   nsenter escape:
+#     nsenter --target <host-pid> --mount --uts --ipc --net --pid
+#     Combined with sufficient capabilities, an attacker can enter the host's
+#     namespaces by targeting a host-namespace process's PID.
+#
+# Note: hostPID lives on spec (not spec.containers[].securityContext).
+# It applies to all containers in the Pod simultaneously — there is no
+# per-container hostPID setting. The Kyverno policy checks spec.hostPID
+# directly rather than iterating containers.
 apiVersion: v1
 kind: Pod
 metadata:

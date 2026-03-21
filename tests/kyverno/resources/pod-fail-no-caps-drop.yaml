@@ -1,4 +1,45 @@
-# No capabilities.drop — must be denied by require-drop-all-capabilities.
+# pod-fail-no-caps-drop.yaml — No capabilities.drop
+#
+# Violation: capabilities not set (no drop list)
+# Policy:    no-privileged.yaml → require-drop-all-capabilities (rule 2)
+# CIS:       CIS Kubernetes Benchmark 5.2.9
+#
+# Linux capabilities divide root's all-or-nothing privilege model into ~40
+# discrete units. Kubernetes grants every container a default set of capabilities
+# regardless of whether the application needs them. The default set includes:
+#
+#   CHOWN          — change file ownership
+#   DAC_OVERRIDE   — bypass file permission checks
+#   FOWNER         — bypass permission checks for operations requiring ownership
+#   FSETID         — don't clear SUID/SGID bits on file modification
+#   KILL           — send signals to arbitrary processes
+#   NET_BIND_SERVICE — bind to ports below 1024
+#   NET_RAW        — use raw and packet sockets (enables ARP spoofing, ICMP flood)
+#   SETFCAP        — set file capabilities
+#   SETGID         — change GID of process
+#   SETPCAP        — transfer capabilities between sets
+#   SETUID         — change UID of process
+#   SYS_CHROOT     — use chroot()
+#
+# None of these are needed by a typical web application. NET_RAW alone is
+# sufficient to conduct ARP cache poisoning attacks against other pods on the
+# same node. SETUID combined with a SUID binary enables privilege escalation
+# even with runAsUser: 10001 (the privilege escalation fixture covers this
+# separately).
+#
+# This fixture has no capabilities block at all — the most common real-world
+# failure mode. Developers who copy a minimal Pod spec often omit the
+# securityContext entirely, or set only what they remember.
+#
+# The policy rule (require-drop-all-capabilities) uses validate.pattern:
+#   containers:
+#     - securityContext:
+#         capabilities:
+#           drop: "ALL | *ALL*"
+#
+# validate.pattern requires the field to be present AND match the pattern.
+# An absent capabilities block fails the pattern, so this fixture triggers
+# the rule. The test assertion is fail/deny on require-drop-all-capabilities.
 apiVersion: v1
 kind: Pod
 metadata:
@@ -13,4 +54,4 @@ spec:
         runAsUser: 10001
         allowPrivilegeEscalation: false
         privileged: false
-        # capabilities not set at all
+        # capabilities not set — the default Kubernetes capability set is granted

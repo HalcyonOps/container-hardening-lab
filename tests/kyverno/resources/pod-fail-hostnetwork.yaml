@@ -1,4 +1,45 @@
-# Sets hostNetwork: true — must be denied by deny-host-namespaces.
+# pod-fail-hostnetwork.yaml — Host network namespace sharing
+#
+# Violation: hostNetwork: true
+# Policy:    no-privileged.yaml → deny-host-namespaces (rule 3, condition 3)
+# CIS:       CIS Kubernetes Benchmark 5.2.4
+#
+# hostNetwork: true removes the network isolation between the container and
+# the host node. Instead of the container operating in its own network
+# namespace (with its own virtual ethernet interface managed by the CNI
+# plugin), it shares the host's physical network stack directly.
+#
+# What an attacker gains with hostNetwork: true:
+#
+#   Node network traffic visibility:
+#     The container can listen on any interface the node has — including
+#     the interface used for pod-to-pod communication on the node's CNI
+#     overlay network. With raw sockets (and NET_RAW capability), this
+#     enables packet capture of all node-level traffic, including traffic
+#     from other pods.
+#
+#   Port binding on the host:
+#     The container can bind to any port on any host interface. This enables
+#     port hijacking — if the container starts before a legitimate service,
+#     it can occupy the service's expected port. It also allows binding to
+#     privileged ports (<1024) without CAP_NET_BIND_SERVICE.
+#
+#   Kubernetes network policy bypass:
+#     Kubernetes NetworkPolicy resources control traffic between pods using
+#     IP and port rules enforced by the CNI plugin. hostNetwork: true puts
+#     the container on the host's network, outside the namespace that CNI
+#     policies apply to — all ingress/egress restrictions are bypassed.
+#
+#   Internal service reach:
+#     The container can reach services listening only on localhost (127.0.0.1)
+#     of the host — the kubelet API, local monitoring agents, or other
+#     infrastructure services that are not exposed over the pod network.
+#
+# Legitimate uses:
+#   Network infrastructure pods (kube-proxy, CNI plugins like Calico node)
+#   genuinely require hostNetwork to function. These should be exempted via
+#   Kyverno PolicyExceptions scoped to the kube-system namespace, not by
+#   relaxing this policy for all workloads.
 apiVersion: v1
 kind: Pod
 metadata:

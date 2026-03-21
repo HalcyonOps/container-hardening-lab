@@ -1,4 +1,37 @@
-# Explicitly sets runAsUser: 0 — must be denied by disallow-root-user.
+# pod-fail-runasroot.yaml — Explicit UID 0
+#
+# Violation: runAsUser: 0
+# Policy:    no-root.yaml → deny-root-user (rule 1)
+# CIS:       CIS Kubernetes Benchmark 5.2.6
+#
+# This fixture tests the most direct form of root escalation: explicitly
+# requesting UID 0 in the Pod manifest. UID 0 is the root user on Linux.
+# A container running as root has write access to any file on the container
+# filesystem and, if the container runtime is misconfigured, may be able to
+# escape to the host.
+#
+# Why this matters beyond "don't run as root":
+#   Many images historically defaulted to running as root because it was the
+#   path of least resistance. If an application is exploited and the attacker
+#   achieves code execution, they inherit the process's UID. Root inside a
+#   container can:
+#     - Read secrets mounted at arbitrary paths
+#     - Write to the container filesystem (drop persistence tools)
+#     - Exploit container runtime vulnerabilities that require root inside
+#       the container (e.g. runc CVE-2019-5736)
+#
+# Why runAsUser: 0 is not the only way to run as root:
+#   A container with NO runAsUser set may still run as root if the image's
+#   Dockerfile does not include a USER instruction. That case is caught by
+#   the deny-root-user rule checking for AnyIn [0] in the projected UID array
+#   — the absent field resolves to the image default, which the runtime
+#   enforces. The runAsNonRoot: false fixture (pod-fail-runasnonroot-false.yaml)
+#   tests the explicit opt-out path.
+#
+# The other securityContext fields are set correctly here. This isolates the
+# test: only runAsUser is the problem. This makes the test assertion precise —
+# if the policy erroneously fires on this Pod for a different field, the test
+# result would still be fail/deny, masking a policy logic error.
 apiVersion: v1
 kind: Pod
 metadata:
