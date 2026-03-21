@@ -228,7 +228,8 @@ jobs:
         if: github.event_name == 'push'
         id: push
         run: |
-          IMAGE_REF="ghcr.io/${{ github.repository_owner }}/container-hardening-lab-${{ matrix.image }}:latest"
+          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          IMAGE_REF="ghcr.io/${OWNER}/container-hardening-lab-${{ matrix.image }}:latest"
           docker tag "hardened-${{ matrix.image }}:latest" "$IMAGE_REF"
           docker push "$IMAGE_REF"
           echo "image_ref=$IMAGE_REF" >> "$GITHUB_OUTPUT"
