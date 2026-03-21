@@ -1,37 +1,121 @@
-# images/python — Hardened Python 3.12 Image
+# hardened-python
 
-**Base:** `python:3.12-slim`
-**Reference example** for the CIS Docker Benchmark hardening pattern used throughout this project.
+**Base image:** `python:3.12-slim`
+**Runtime user:** `appuser` (UID 10001)
+**Exposed port:** 8000
 
-## Hardening Decisions
+The reference implementation for the hardening pattern used throughout this lab. Every decision made here — multi-stage build, non-root user, SUID stripping, package removal — is documented with the CIS Docker Benchmark control it satisfies and the attack it mitigates.
+
+---
+
+## Hardening decisions
 
 ### Multi-stage build (CIS 4.4)
-A `builder` stage installs pip dependencies into `/install`. Only the compiled packages are copied to the `final` stage — no `pip`, `gcc`, or build tooling reaches the runtime image.
 
-### Non-root user: `appuser` (UID 10001) (CIS 4.1)
-A dedicated user and group with no home directory and `/sbin/nologin` shell. UID/GID above 10000 avoids collision with system service accounts. The `WORKDIR` is `/app`, owned by `appuser`.
+```
+builder stage  →  installs pip deps into /install prefix
+final stage    →  copies /install only; no pip, gcc, or build tools
+```
 
-### Stripped SUID/SGID bits (CIS 4.8)
-All SUID/SGID bits are removed from binaries in the final stage via `chmod ug-s`. This prevents privilege escalation through misuse of setuid executables like `su`, `ping`, or `passwd`.
+Build tooling is the single largest contributor to container attack surface that isn't required at runtime. A compromised container with `pip` and `gcc` can download and compile arbitrary code. The builder stage installs dependencies into a prefix (`/install`) that is copied wholesale into the final image — leaving the build toolchain behind.
+
+---
+
+### Non-root user: `appuser` UID 10001 (CIS 4.1)
+
+```dockerfile
+RUN groupadd --gid 10001 appgroup && \
+    useradd --uid 10001 --gid appgroup --no-create-home --shell /sbin/nologin appuser
+```
+
+Containers run as `root` by default. If an attacker exploits a vulnerability in the application, they inherit the process's UID. Running as UID 10001 limits what that attacker can do inside the container and on any mounted volumes.
+
+- **UID above 10000** — avoids collision with system service accounts (typically 0–999) and application accounts (typically 1000–9999)
+- **No home directory** — no `~/.ssh`, `~/.bash_history`, or credential files for an attacker to find or write to
+- **`/sbin/nologin` shell** — the account cannot be used for interactive login even if credentials were somehow obtained
+
+---
 
 ### Removed attack-surface packages (CIS 4.7)
-`wget`, `curl`, `perl`, `gcc`, and `binutils` are removed. These are commonly abused for post-exploitation downloads or compile-and-run attacks.
+
+| Package | Why removed |
+|---|---|
+| `wget` / `curl` | Download utilities — primary tools for pulling second-stage payloads in post-exploitation |
+| `perl` | Scripting runtime — `perl -e` one-liners are a standard persistence technique; `perl-base` ships the binary even after `apt remove`, so it is deleted directly |
+| `gcc` / `binutils` | Compiler toolchain — eliminates compile-and-run attacks inside the container |
+
+---
+
+### SUID/SGID bits stripped (CIS 4.8)
+
+```dockerfile
+find / -xdev \( -perm /4000 -o -perm /2000 \) -exec chmod ug-s {} +
+```
+
+SUID binaries (e.g. `su`, `passwd`, `ping`) run as their *owner* (usually root) regardless of who calls them. An attacker who finds an exploitable SUID binary can escalate from the app user to root without leaving the container. Stripping these bits closes that path entirely.
+
+The structure tests assert this at runtime:
+
+```
+✓ no SUID binaries present  (find / -xdev -perm /4000 | wc -l = 0)
+✓ no SGID binaries present  (find / -xdev -perm /2000 | wc -l = 0)
+```
+
+---
 
 ### Cleaned APT cache (CIS 4.7)
-`/var/lib/apt/lists/*` is purged in the same `RUN` layer as package operations to prevent the package index from appearing in the image layer, reducing size and exposure.
 
-### HEALTHCHECK defined (CIS 4.6)
-A `HEALTHCHECK` instruction is included. Container orchestrators (Docker Swarm, Kubernetes liveness probes) can use this to detect unhealthy instances. Adjust the URL to match your application.
+```dockerfile
+&& apt-get clean \
+&& rm -rf /var/lib/apt/lists/*
+```
 
-### OCI labels
-`org.opencontainers.image.*` labels are applied for traceability and provenance. In CI, `--build-arg` injects the git SHA into `org.opencontainers.image.revision`.
+Each `RUN` instruction creates an image layer. Cleaning the APT cache in the *same* layer as the `apt-get` operations ensures the package index never appears in any layer — reducing image size and preventing an attacker from using `apt-get install` inside the container.
 
-### No secrets in image (CIS 4.9 / 4.10)
-No credentials, tokens, or environment variable secrets are baked in. Secrets must be injected at runtime via a secrets manager, mounted secrets, or environment variables set outside the image.
+---
 
-## Runtime Recommendations
+### HEALTHCHECK (CIS 4.6)
 
-Run with these flags to complete the hardening posture (enforced by admission policies):
+```dockerfile
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')" || exit 1
+```
+
+Without a `HEALTHCHECK`, Docker and Kubernetes cannot distinguish a running-but-deadlocked container from a healthy one. The health check uses Python's standard library — no `curl` or `wget` required, consistent with their removal.
+
+---
+
+## CVE scan result
+
+```
+hardened-python:latest — Trivy scan (CRITICAL, HIGH)
+
+Total: 0
+```
+
+The `python:3.12-slim` base is actively maintained and receives timely CVE patches. Any findings that arise from the base image with no available fix are documented in [`.trivyignore`](.trivyignore) with justification.
+
+---
+
+## Using this as a base image
+
+```dockerfile
+FROM hardened-python:latest
+
+# Your application already owns /app as appuser
+COPY --chown=appuser:appgroup src/ ./src/
+
+# If you need additional pip packages, install them as root in a
+# preceding build stage and copy the result — do not run pip at runtime
+```
+
+For a full multi-stage pattern extending this image, see the builder stage in [`Dockerfile`](Dockerfile).
+
+---
+
+## Runtime flags
+
+The image is designed to run with a fully locked-down security context. The Kyverno admission policies in [`policies/kyverno/`](../../policies/kyverno/) enforce these at the cluster level.
 
 ```bash
 docker run \
@@ -43,27 +127,21 @@ docker run \
   hardened-python:latest
 ```
 
-| Flag | Rationale |
-|---|---|
-| `--read-only` | Prevents filesystem tampering at runtime |
-| `--tmpfs /tmp` | Provides a writable temp area with `noexec` |
-| `--cap-drop=ALL` | Removes all Linux capabilities; add back only what's required |
-| `--no-new-privileges` | Prevents privilege escalation via execve |
+| Flag | CIS control | What it prevents |
+|---|---|---|
+| `--read-only` | 5.12 | Filesystem tampering; attacker cannot write malware to disk |
+| `--tmpfs /tmp` | 5.12 | Provides a writable temp space with `noexec` — scripts dropped here cannot be executed |
+| `--cap-drop=ALL` | 5.4 | Removes all Linux capabilities; add back only what the app explicitly needs |
+| `--security-opt no-new-privileges` | 5.4 | Prevents privilege escalation via `execve` — a child process cannot gain more privileges than the parent |
 
-## Building
+---
 
-```bash
-# From repo root
-make build IMAGE=python
-
-# Directly
-docker build -t hardened-python:latest images/python/
-```
-
-## Scanning
+## Quick reference
 
 ```bash
-make scan IMAGE=python
-# or
-trivy image --exit-code 1 --severity CRITICAL,HIGH hardened-python:latest
+make build IMAGE=python          # Build the image
+make scan  IMAGE=python          # Trivy CVE scan (fails on CRITICAL/HIGH)
+make sbom  IMAGE=python          # Generate CycloneDX + SPDX SBOM
+make lint  IMAGE=python          # OPA/Conftest policy check on the Dockerfile
+make test-structure IMAGE=python # 14 runtime assertions against the built image
 ```
