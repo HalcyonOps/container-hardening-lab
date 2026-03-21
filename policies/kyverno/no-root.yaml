@@ -1,11 +1,59 @@
 # policies/kyverno/no-root.yaml
-# Enforce that Pods do not run containers as root.
+#
+# Kubernetes admission policy: deny Pods that run containers as root.
+#
+# CIS Kubernetes Benchmark: 5.2.6 — Do not admit root containers
+# CIS Docker Benchmark:     4.1   — Ensure a user for the container has been created
+# Kubernetes PSS:           Restricted profile — runAsNonRoot: true required
 #
 # Apply to a cluster:
 #   kubectl apply -f policies/kyverno/no-root.yaml
 #
-# CIS Kubernetes Benchmark: 5.2.6
-# CIS Docker Benchmark: 4.1
+# Test with Kyverno CLI (no cluster required):
+#   kyverno test tests/kyverno/ --detailed-results
+#
+# =============================================================================
+# How Kyverno admission policies work
+# =============================================================================
+#
+# Kyverno registers as a Kubernetes admission webhook. Every time a Pod is
+# created or updated, the API server sends the request to Kyverno before
+# persisting it. Kyverno evaluates the ClusterPolicy rules and either allows
+# the request through or rejects it with the policy message.
+#
+# ClusterPolicy applies cluster-wide (all namespaces).
+# Policy (namespace-scoped) applies within a single namespace.
+#
+# validationFailureAction controls what happens when a rule triggers:
+#   Enforce — request is rejected; the Pod is not created (hard block)
+#   Audit   — request is allowed; a PolicyReport is generated for review
+#
+# background: true means Kyverno also evaluates existing resources against
+# new or changed policies, generating PolicyReports for resources that were
+# admitted before the policy existed.
+#
+# =============================================================================
+# validate.deny with JMESPath array projections vs validate.foreach.deny
+# =============================================================================
+#
+# Kyverno offers two ways to check conditions across all containers in a Pod:
+#
+# Option A — validate.foreach.deny (iterate per container):
+#   Evaluates the deny block once per container. This is more precise —
+#   you can reference `element.securityContext` directly. However, the
+#   Kyverno CLI (`kyverno test`) does NOT evaluate foreach.deny rules,
+#   causing all test results to show "Excluded" rather than pass/fail.
+#
+# Option B — validate.deny with JMESPath projection (used here):
+#   `request.object.spec.containers[].securityContext.runAsUser` returns
+#   an array of all runAsUser values across all containers in one expression.
+#   AnyIn then checks whether 0 (root) appears anywhere in that array.
+#   This approach is fully evaluated by `kyverno test`.
+#
+# The tradeoff: JMESPath projections omit fields that are absent. If no
+# container sets runAsUser, the array is empty and AnyIn [0] is false —
+# meaning the rule does not fire for unset fields. This is intentional:
+# not setting runAsUser is a separate problem caught by runAsNonRoot.
 ---
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy
@@ -21,14 +69,30 @@ metadata:
       no container in a Pod sets runAsUser: 0 or runAsNonRoot: false.
       It also blocks allowPrivilegeEscalation: true.
 spec:
+  # Enforce: Pod admission is rejected if any rule triggers.
+  # Change to Audit during initial rollout to assess impact before blocking.
   validationFailureAction: Enforce
   background: true
   rules:
+
     # -------------------------------------------------------------------------
-    # Rule 1: deny runAsUser: 0 or runAsNonRoot: false in any container
-    # Uses top-level validate.deny with JMESPath array projections so that
-    # kyverno test evaluates it correctly (foreach.deny is not tested by CLI).
+    # Rule 1: deny runAsUser: 0 or runAsNonRoot: false
     # -------------------------------------------------------------------------
+    # Two attack surfaces are covered in one rule:
+    #
+    #   runAsUser: 0 — explicitly sets the container process to root UID.
+    #     An attacker who exploits the application inherits UID 0 inside
+    #     the container, with root access to the container filesystem and
+    #     any mounted volumes.
+    #
+    #   runAsNonRoot: false — disables Kubernetes' own root check, allowing
+    #     the container to start even if the image USER is root. The default
+    #     is unset (not false), so this catches an explicit opt-out.
+    #
+    # JMESPath projection:
+    #   containers[].securityContext.runAsUser
+    #   returns an array of all runAsUser values, e.g. [10001, 0, 10002]
+    #   AnyIn [0] is true if 0 appears anywhere in that array.
     - name: require-non-root-user
       match:
         any:
@@ -52,8 +116,17 @@ spec:
                   - false
 
     # -------------------------------------------------------------------------
-    # Rule 2: deny allowPrivilegeEscalation: true in any container
+    # Rule 2: deny allowPrivilegeEscalation: true
     # -------------------------------------------------------------------------
+    # allowPrivilegeEscalation controls whether a process can gain more
+    # privileges than its parent via execve() — for example, by running a
+    # SUID binary. Setting this to true permits privilege escalation attacks
+    # even when the container starts as a non-root user.
+    #
+    # The safe value is false. It should be set explicitly — the default is
+    # unset, which Kubernetes treats as "allowed" for backward compatibility.
+    # This rule blocks the explicit opt-in; a separate policy or PSS profile
+    # should enforce the explicit opt-out.
     - name: disallow-privilege-escalation
       match:
         any:

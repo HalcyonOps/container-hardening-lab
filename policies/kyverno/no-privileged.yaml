@@ -1,11 +1,39 @@
 # policies/kyverno/no-privileged.yaml
-# Enforce that Pods do not use privileged containers.
+#
+# Kubernetes admission policy: deny privileged containers and host namespace sharing.
+#
+# CIS Kubernetes Benchmark:
+#   5.2.1 — Do not admit privileged containers
+#   5.2.2 — Do not admit containers wishing to share the host process ID namespace
+#   5.2.3 — Do not admit containers wishing to share the host IPC namespace
+#   5.2.4 — Do not admit containers wishing to share the host network namespace
+#   5.2.9 — Do not admit containers with added capabilities
+# CIS Docker Benchmark: 5.4 — Ensure privileged containers are not used
 #
 # Apply to a cluster:
 #   kubectl apply -f policies/kyverno/no-privileged.yaml
 #
-# CIS Kubernetes Benchmark: 5.2.1
-# CIS Docker Benchmark: 5.4
+# Test with Kyverno CLI (no cluster required):
+#   kyverno test tests/kyverno/ --detailed-results
+#
+# =============================================================================
+# validate.deny vs validate.pattern — when to use each
+# =============================================================================
+#
+# This file uses two different Kyverno validation strategies:
+#
+# validate.deny (rules 1 and 3):
+#   Evaluates a set of JMESPath conditions and denies the request if any/all
+#   are true. Used when you need to inspect a value that should NOT be present.
+#   Works well with array projections (containers[].securityContext.privileged).
+#
+# validate.pattern (rule 2):
+#   Defines the shape that the resource MUST match. Fields not mentioned are
+#   ignored; fields that are present must match the pattern. Used when you need
+#   to assert that something IS present and has the right value.
+#   The pattern `"ALL | *ALL*"` uses Kyverno's wildcard syntax:
+#     "ALL"    — exact string match
+#     "*ALL*"  — string contains "ALL" (catches "ALL", "all", "ALL,NET_ADMIN")
 ---
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy
@@ -19,17 +47,31 @@ metadata:
     policies.kyverno.io/description: >-
       Privileged containers share the host's kernel namespaces and have
       unrestricted device access, equivalent to running as root on the node.
-      This policy denies privileged: true and enforces that all capabilities
-      are dropped.
+      This policy denies privileged: true, enforces capabilities.drop: ALL,
+      and blocks hostPID, hostIPC, and hostNetwork.
 spec:
   validationFailureAction: Enforce
   background: true
   rules:
+
     # -------------------------------------------------------------------------
-    # Rule 1: deny privileged: true in any container
-    # Uses top-level validate.deny with JMESPath array projection so that
-    # kyverno test evaluates it correctly (foreach.deny is not tested by CLI).
+    # Rule 1: deny securityContext.privileged: true
     # -------------------------------------------------------------------------
+    # A privileged container runs with nearly all Linux capabilities and has
+    # full access to the host's devices and kernel interfaces — effectively
+    # equivalent to root on the node. Any workload running privileged can:
+    #   - Mount the host filesystem
+    #   - Load kernel modules
+    #   - Access raw network interfaces
+    #   - Escape the container via /proc/sysrq-trigger or similar
+    #
+    # There is no legitimate use case for privileged: true in a production
+    # workload. Infrastructure components (CNI plugins, device drivers) that
+    # genuinely require it should be exempted via a Kyverno PolicyException,
+    # not by relaxing this policy.
+    #
+    # JMESPath projection returns an array of all privileged values across
+    # containers. AnyIn [true] fires if any container is privileged.
     - name: deny-privileged
       match:
         any:
@@ -49,10 +91,24 @@ spec:
                   - true
 
     # -------------------------------------------------------------------------
-    # Rule 2: require ALL capabilities dropped in every container
-    # validate.pattern checks each element of the containers array
-    # against the pattern, enforcing the constraint per-container.
+    # Rule 2: require capabilities.drop: ALL in every container
     # -------------------------------------------------------------------------
+    # Linux capabilities break root's all-or-nothing privilege model into
+    # discrete units (NET_BIND_SERVICE, SYS_PTRACE, CAP_CHOWN, etc.). By
+    # default, Kubernetes grants a set of capabilities to every container —
+    # including ones rarely needed by application code.
+    #
+    # The principle of least privilege requires dropping ALL capabilities and
+    # adding back only what the specific workload requires. This rule enforces
+    # the drop; adding back capabilities requires a separate policy exception.
+    #
+    # validate.pattern is used here because we are asserting presence of a
+    # required field, not checking for a forbidden value. The pattern syntax:
+    #   "ALL | *ALL*"
+    #   Kyverno treats | as OR between patterns. This matches:
+    #     - The exact string "ALL" (most common form)
+    #     - Any string containing "ALL" (catches list values like "ALL,NET_ADMIN"
+    #       while still requiring ALL to be present in the drop list)
     - name: require-drop-all-capabilities
       match:
         any:
@@ -73,6 +129,27 @@ spec:
     # -------------------------------------------------------------------------
     # Rule 3: deny hostPID, hostIPC, hostNetwork
     # -------------------------------------------------------------------------
+    # These three fields share the host's kernel namespaces with the container:
+    #
+    #   hostPID:     Container can see and signal all host processes. An attacker
+    #                can attach to host processes, read their memory via /proc,
+    #                and escalate to the node.
+    #
+    #   hostIPC:     Container shares the host's inter-process communication
+    #                namespace. Allows reading shared memory segments from other
+    #                host processes, including other pods on the same node.
+    #
+    #   hostNetwork: Container uses the host's network stack directly, bypassing
+    #                Kubernetes network policies and CNI isolation. The container
+    #                can sniff all node-level traffic.
+    #
+    # These fields live on spec (not spec.containers[].securityContext), so
+    # they are checked directly rather than via array projection.
+    #
+    # `|| \`false\`` — JMESPath returns null for fields that are absent from
+    # the request. The fallback ensures that an unset field evaluates to false
+    # rather than null, which would cause the Equals comparison to behave
+    # unexpectedly. Unset = false = not enabled = rule does not trigger.
     - name: deny-host-namespaces
       match:
         any:

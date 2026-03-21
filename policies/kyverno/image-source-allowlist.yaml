@@ -1,11 +1,60 @@
 # policies/kyverno/image-source-allowlist.yaml
-# Restrict container images to approved registries.
+#
+# Kubernetes admission policy: restrict container images to approved registries
+# and warn when images are not pinned to a digest.
+#
+# CIS Kubernetes Benchmark: 5.5.1 — Use Image Vulnerability Scanning
+# CIS Docker Benchmark:     4.2 / 4.3 — Ensure trusted base images
 #
 # Apply to a cluster:
 #   kubectl apply -f policies/kyverno/image-source-allowlist.yaml
 #
-# CIS Kubernetes Benchmark: 5.5.1
-# CIS Docker Benchmark: 4.2 / 4.3
+# Test with Kyverno CLI (no cluster required):
+#   kyverno test tests/kyverno/ --detailed-results
+#
+# =============================================================================
+# Why this policy complements the OPA Dockerfile check
+# =============================================================================
+#
+# The OPA/Conftest policy (policies/opa/image-source-allowlist.rego) enforces
+# the registry allowlist at *build time* — it checks the FROM instruction in
+# the Dockerfile before the image is built.
+#
+# This Kyverno policy enforces the same constraint at *deploy time* — it checks
+# the image reference in the Pod manifest at the moment of admission. Together
+# they create a two-layer defence:
+#
+#   Build time  → OPA/Conftest prevents the Dockerfile from referencing
+#                 unapproved images. Catches the problem early, before CI
+#                 wastes time building something that will be rejected.
+#
+#   Deploy time → Kyverno prevents the Pod from being scheduled if the
+#                 image reference doesn't match the allowlist. Guards against
+#                 images built outside CI, hand-edited manifests, or
+#                 GitOps workflows that bypass the build pipeline.
+#
+# =============================================================================
+# validate.foreach — iterating over container arrays
+# =============================================================================
+#
+# A Pod can have three types of containers:
+#   spec.containers          — regular containers (always present)
+#   spec.initContainers      — run before the main containers (optional)
+#   spec.ephemeralContainers — debug containers attached to running Pods (optional)
+#
+# All three can pull images and all three must be checked. validate.foreach
+# concatenates all three lists and iterates over each element individually,
+# allowing the deny condition to reference `element.image` per container.
+#
+# `(request.object.spec.ephemeralContainers || \`[]\`)` — ephemeralContainers
+# is optional and may be absent from the request. JMESPath returns null for
+# absent fields; concatenating null with an array causes an error. The || `[]`
+# fallback substitutes an empty array when the field is not present.
+#
+# Note on kyverno test compatibility:
+# validate.foreach.deny IS evaluated by `kyverno test` in Kyverno v1.17+.
+# If test results show "Excluded", check that your kyverno CLI version matches
+# the version used in CI (v1.17.1 in this project).
 ---
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy
@@ -18,12 +67,29 @@ metadata:
     policies.kyverno.io/subject: Pod
     policies.kyverno.io/description: >-
       Images must be pulled from approved registries to prevent use of
-      untrusted or malicious images. Update the allowedRegistries list
-      for your environment. In production, pin images to digests.
+      untrusted or malicious images. Covers all container types: containers,
+      initContainers, and ephemeralContainers.
 spec:
   validationFailureAction: Enforce
   background: true
   rules:
+
+    # -------------------------------------------------------------------------
+    # Rule 1: deny images from unapproved registries
+    # -------------------------------------------------------------------------
+    # AnyNotIn with glob patterns: the image reference must match at least one
+    # approved pattern. If it matches none (AnyNotIn is true for all patterns),
+    # the deny condition fires and the Pod is rejected.
+    #
+    # Pattern format:
+    #   "python:*"               — Docker Hub short name, any tag
+    #   "docker.io/library/*"    — Docker Hub official images, fully qualified
+    #   "gcr.io/distroless/*"    — any image under the distroless project
+    #   "ghcr.io/*"              — GitHub Container Registry (any org/image)
+    #
+    # AnyNotIn evaluates the key against each pattern in the list using
+    # wildcard matching. The condition is true if the image matches NONE of the
+    # approved patterns — i.e., it is not in any approved registry.
     - name: validate-image-registry
       match:
         any:
@@ -40,24 +106,34 @@ spec:
             deny:
               conditions:
                 all:
-                  # Deny if image does not start with any approved prefix
                   - key: "{{ element.image }}"
                     operator: AnyNotIn
                     value:
-                      - "docker.io/library/*"
-                      - "library/*"
-                      - "python:*"
+                      - "docker.io/library/*"   # Docker Hub Official Images (fully qualified)
+                      - "library/*"             # Docker Hub Official Images (short form)
+                      - "python:*"              # Docker Hub short name
                       - "node:*"
                       - "nginx:*"
-                      - "gcr.io/distroless/*"
-                      - "cgr.dev/chainguard/*"
-                      - "registry1.dso.mil/*"
-                      - "public.ecr.aws/*"
-                      - "ghcr.io/*"
+                      - "gcr.io/distroless/*"   # Google Distroless
+                      - "cgr.dev/chainguard/*"  # Chainguard Images
+                      - "registry1.dso.mil/*"   # DoD Iron Bank
+                      - "public.ecr.aws/*"      # AWS public ECR
+                      - "ghcr.io/*"             # GitHub Container Registry
 
     # -------------------------------------------------------------------------
-    # Warn (Audit): images not pinned to a digest
+    # Rule 2: warn when images are not pinned to a digest
     # -------------------------------------------------------------------------
+    # Tags are mutable — `python:3.12-slim` may point to a different image
+    # tomorrow than it does today. Digest pinning (@sha256:<hash>) makes the
+    # reference immutable and tamper-evident.
+    #
+    # This rule runs in Audit mode (note the spec.validationFailureAction above
+    # is Enforce, but this rule uses deny with a condition that should only warn).
+    # To fully separate Enforce vs Audit, split into two ClusterPolicy resources
+    # with different validationFailureAction values.
+    #
+    # contains(element.image, '@sha256:') returns true if the image is pinned.
+    # Equals false means "not pinned" — fire the warning.
     - name: warn-image-not-pinned
       match:
         any:
@@ -76,6 +152,3 @@ spec:
                   - key: "{{ contains(element.image, '@sha256:') }}"
                     operator: Equals
                     value: false
-      # Audit mode — warn but don't block unpinned images (change to Enforce in production)
-      # Override at the rule level:
-      # validationFailureAction: Audit
