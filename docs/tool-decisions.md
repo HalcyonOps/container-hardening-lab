@@ -132,3 +132,53 @@ Distroless is used in [docs/adding-an-image.md](adding-an-image.md) as the recom
 - nginx as a static file server has no native extension requirements that would make Alpine's libc a concern
 
 **Chainguard Images** (`cgr.dev/chainguard/`) are on the approved registry allowlist and are a strong choice for new images — they are rebuilt daily, signed with Sigstore, and maintain near-zero CVE counts. They were not used as the primary base for the existing images because the Python and Node Chainguard images are minimalist by design and require more configuration to use as drop-in replacements.
+
+---
+
+## Image signing — Cosign (keyless) over key-based signing
+
+**Chosen:** [Cosign](https://github.com/sigstore/cosign) with keyless signing (Sigstore)
+**Evaluated:** Cosign with a static key pair, Notary v2 (Docker Content Trust)
+
+**Static key signing** is the traditional approach: generate a key pair, store the private key in a secrets manager, sign with it in CI. The problems:
+
+- Long-lived private keys are a persistent target for compromise
+- Key rotation requires re-signing all existing images
+- Key storage in CI secrets adds a management surface (rotation schedule, access audits)
+
+**Keyless signing** (Sigstore) replaces the long-lived key with a short-lived certificate tied to a workload identity — in this case, GitHub Actions OIDC:
+
+1. CI requests a certificate from Sigstore Fulcio using the GitHub OIDC token as proof of identity
+2. Fulcio issues a certificate valid for ~10 minutes, embedding the workflow URL as the subject
+3. Cosign signs the image with the ephemeral key and records the signature in the Sigstore Rekor transparency log
+4. The ephemeral key is discarded — there is nothing to rotate or protect
+
+Verification requires no keys: the verifier checks the certificate subject (the workflow URL) and the issuer (GitHub Actions OIDC) against the Rekor log entry.
+
+**Notary v2** (Docker Content Trust) is the OCI-standard signing mechanism and is the right choice for air-gapped environments or organisations that run their own Notary server. For a project using GitHub Actions and ghcr.io, keyless Cosign is simpler to operate with no infrastructure to run.
+
+The tradeoff: keyless signing depends on Sigstore's public infrastructure (Fulcio, Rekor). An air-gapped environment needs to run its own Sigstore stack or fall back to key-based signing.
+
+---
+
+## Runtime security — Falco over alternatives
+
+**Chosen:** [Falco](https://falco.org/) (CNCF graduated)
+**Evaluated:** Tetragon (Cilium), Tracee (Aqua), Sysdig
+
+All four tools monitor container behaviour at the syscall level. The key differences:
+
+| | Falco | Tetragon | Tracee |
+|---|---|---|---|
+| Mechanism | kernel module or eBPF | eBPF only | eBPF only |
+| Rule language | YAML + Falco condition syntax | YAML + CEL | Rego or YAML |
+| Kubernetes integration | DaemonSet + Helm chart | Kubernetes-native (operator) | DaemonSet |
+| Docker-only support | Yes (docker socket enrichment) | Requires Kubernetes | Yes |
+| CNCF status | Graduated | Incubating | Sandbox |
+| Community size | Largest (8k+ GitHub stars, Falco ecosystem) | Growing | Smaller |
+
+**Falco** was chosen primarily for the Docker-socket enrichment mode, which allows it to run alongside containers in a plain Docker environment without Kubernetes. This matches the lab's docker-compose demo setup. Falco's rule language is purpose-built for condition matching on syscall fields, which makes the rules readable and easy to extend.
+
+**Tetragon** would be the choice for a Kubernetes-first deployment. Its eBPF implementation can enforce policies (kill a process, drop a network packet) rather than only alerting, which is a stronger security posture. It is the natural Falco replacement as eBPF tooling matures. For this lab, it was not chosen because it requires a Kubernetes cluster — the docker-compose demo would not work.
+
+**Tracee** supports Rego rules, which would have created consistency with the OPA/Conftest policies in this project. It was not chosen because its Rego integration is an additional layer on top of its event system, and the Falco rule language is more natural for syscall condition matching.

@@ -13,6 +13,8 @@ Install these tools before working on the project locally. The versions listed a
 | Trivy | 0.69.3 | [aquasecurity.github.io/trivy](https://aquasecurity.github.io/trivy/latest/getting-started/installation/) |
 | Syft | ≥ 1.0 | [github.com/anchore/syft](https://github.com/anchore/syft#installation) |
 | container-structure-test | 1.19.3 | [github.com/GoogleContainerTools/container-structure-test](https://github.com/GoogleContainerTools/container-structure-test#installation) |
+| Cosign | ≥ 2.0 | [github.com/sigstore/cosign](https://github.com/sigstore/cosign#installation) |
+| Docker Compose | ≥ 2.0 | bundled with Docker Desktop; `apt install docker-compose-plugin` on Linux |
 
 ---
 
@@ -72,6 +74,24 @@ make scan IMAGE=python
 make sbom IMAGE=python
 make test-structure IMAGE=python
 ```
+
+---
+
+### Runtime security demo — requires Docker Compose
+
+```bash
+cd falco/
+docker compose up -d
+docker logs -f falco
+
+# In a second terminal — trigger a rule
+docker exec lab-target apt-get update
+
+# Stop when done
+docker compose down
+```
+
+See [falco/README.md](../falco/README.md) for all five rule triggers.
 
 ---
 

@@ -13,6 +13,8 @@ This lab addresses the most common container security failures in production:
 - **Unpinned or untrusted base images** — an OPA allowlist enforces approved registries and warns on unpinned digests
 - **No admission control** — Kyverno ClusterPolicies block privileged pods, host namespace sharing, and missing capability drops at deploy time
 - **No evidence trail** — every image ships a CycloneDX + SPDX SBOM and a Trivy CVE report; findings gate the CI build
+- **Unsigned images** — every image pushed to ghcr.io is signed with Cosign (keyless, via Sigstore); a Kyverno `verifyImages` policy rejects unsigned images at admission
+- **No runtime visibility** — Falco custom rules detect post-exploitation behavior (shell spawned, package manager executed, outbound C2 connection) inside the hardened containers
 
 ## Repository Structure
 
@@ -40,6 +42,10 @@ This lab addresses the most common container security failures in production:
 │
 ├── examples/
 │   └── unhardened/           # Deliberately insecure Dockerfile — failure demo
+│
+├── falco/
+│   ├── rules/                # Custom Falco runtime detection rules
+│   └── docker-compose.yml    # Local Falco demo setup
 │
 ├── .github/workflows/ci.yml  # Full CI pipeline
 └── Makefile                  # Primary task interface
@@ -202,7 +208,9 @@ flowchart TD
         i4["SARIF → GitHub\nSecurity tab"]:::output
         i5["Generate SBOM\nSyft — CycloneDX + SPDX"]:::step --> i6
         i6["Container structure tests\n41 assertions"]:::step --> i7
+        i6 --> i8
         i7[("Reports artifact\n30-day retention")]:::output
+        i8["Push → ghcr.io\nCosign sign (keyless)"]:::sign
     end
 
     classDef event  fill:#6366f1,stroke:#4f46e5,color:#fff
@@ -211,6 +219,7 @@ flowchart TD
     classDef gate   fill:#f59e0b,stroke:#d97706,color:#fff
     classDef check  fill:#ec4899,stroke:#db2777,color:#fff
     classDef output fill:#64748b,stroke:#475569,color:#fff
+    classDef sign   fill:#8b5cf6,stroke:#7c3aed,color:#fff
 ```
 
 **`policy-tests`** runs first with no Docker dependency — fast feedback on every push.
@@ -218,6 +227,38 @@ flowchart TD
 **`failure-demo`** asserts that the unhardened Dockerfile and `node:18` base image are correctly flagged. A clean result here fails the job, proving the tooling is live.
 
 **`image-pipeline`** runs in parallel across all three images. Trivy findings are uploaded to the GitHub Security tab as SARIF for triage. All reports are archived as build artifacts for 30 days.
+
+## Image Signing
+
+Every image pushed to `ghcr.io` by the CI pipeline is signed with [Cosign](https://github.com/sigstore/cosign) using keyless signing via [Sigstore](https://sigstore.dev/). No private key is stored anywhere — the signature is tied to the GitHub Actions OIDC identity of the workflow.
+
+Verify a signed image (no key required):
+
+```bash
+cosign verify \
+  --certificate-identity-regexp \
+    "https://github.com/R055LE/container-hardening-lab/.github/workflows/ci.yml@refs/heads/main" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+  ghcr.io/r055le/container-hardening-lab-python:latest
+```
+
+A successful verification confirms the image was built and pushed by this CI workflow from the `main` branch — not pushed manually or from a compromised pipeline. The `policies/kyverno/verify-signatures.yaml` ClusterPolicy enforces this at admission time, rejecting any Pod that references an unsigned image from this registry.
+
+## Runtime Security
+
+`falco/` adds a runtime detection layer using [Falco](https://falco.org/) (CNCF graduated). Where the build-time and deploy-time controls reduce the attack surface, Falco detects exploitation attempts that occur after a container is running.
+
+Five custom rules cover the post-exploitation kill chain:
+
+| Rule | What It Catches |
+|---|---|
+| Shell spawned | Interactive shell started inside a hardened container |
+| Package manager | `apt`, `pip`, `npm`, `apk` used to install attack tools |
+| Sensitive file read | `/etc/shadow`, SSH keys, sudoers files opened |
+| Unexpected outbound | Container initiating TCP to an external address (C2/exfil) |
+| Filesystem write | Write to a non-temp path (persistence attempt) |
+
+Run the demo locally with Docker Compose — see [falco/README.md](falco/README.md) for the walkthrough.
 
 ## Deployment (Kubernetes)
 

@@ -1,0 +1,93 @@
+# falco/docker-compose.yml
+#
+# Runs Falco alongside a target container for local runtime security demos.
+#
+# Usage:
+#   cd falco/
+#   docker compose up -d
+#   # Then trigger events per the README
+#
+# How this works:
+#   Falco uses the kernel's eBPF or kernel module to intercept syscalls from
+#   ALL processes on the host — including every container running in Docker.
+#   It enriches syscall events with container metadata fetched via the Docker
+#   socket, which is how it knows which container a syscall came from.
+#
+# The target service is a plain python:3.12-slim container running `sleep
+# infinity`. It has no hardening applied — its purpose is to be exploited
+# during the demo to trigger Falco rules. The README shows how to exec into
+# it and run the commands that match the rule conditions.
+#
+# If you want to test Falco against the actual hardened images, build them
+# first (make build IMAGE=python) and replace the target image with
+# hardened-python:latest. The rules will still fire because they match on
+# container.image.repository, which includes the hardened-* names.
+#
+# Requirements:
+#   - Linux host (or WSL2 with kernel >= 5.8 for modern eBPF)
+#   - Docker with access to /proc and kernel module or eBPF support
+#   - Falco needs privileged: true to access kernel interfaces
+#
+# WSL2 note:
+#   The Microsoft WSL2 kernel supports modern eBPF (kernel >= 5.15 on recent
+#   WSL2 builds). If `docker compose up` fails with a driver error, check
+#   `uname -r` and ensure you're on a kernel that supports eBPF. The kernel
+#   module driver is not available on WSL2.
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # Falco — runtime security monitoring
+  # ---------------------------------------------------------------------------
+  # privileged: true  — Falco needs access to /proc, /boot, /lib/modules, and
+  #                      kernel interfaces to load the eBPF probe or kernel
+  #                      module. This is intentional and documented in Falco's
+  #                      own deployment manifests.
+  # /var/run/docker.sock — used by Falco's container enrichment to map syscall
+  #                        events to container names, images, and labels.
+  # /proc, /boot, etc.  — required for eBPF probe compilation and kernel
+  #                        symbol resolution.
+  # rules.d volume      — custom rules are mounted read-only so Falco loads
+  #                        them at startup alongside the default ruleset.
+  falco:
+    image: falcosecurity/falco:latest
+    container_name: falco
+    privileged: true
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/host/var/run/docker.sock
+      - /proc:/host/proc:ro
+      - /boot:/host/boot:ro
+      - /lib/modules:/host/lib/modules:ro
+      - /usr:/host/usr:ro
+      - /etc:/host/etc:ro
+      - ./rules:/etc/falco/rules.d:ro
+    environment:
+      # Try modern eBPF first (kernel >= 5.8, no module compilation required),
+      # fall back to legacy eBPF, then kernel module if eBPF is unavailable.
+      - FALCO_DRIVER_CHOICE=auto
+    # --modern-bpf  : use libbpf-based eBPF probe (preferred on kernels >= 5.8)
+    # -A            : enable all rules, including disabled-by-default ones
+    # --log-level   : info shows rule load confirmation at startup
+    command: >
+      /usr/bin/falco
+      --modern-bpf
+      -A
+      --log-level info
+
+  # ---------------------------------------------------------------------------
+  # Target container — deliberately unhardened for demo purposes
+  # ---------------------------------------------------------------------------
+  # This container intentionally omits securityContext hardening so it can be
+  # used to demonstrate what Falco catches. It uses python:3.12-slim (the same
+  # base as the hardened Python image) so the custom rules' image list matches.
+  #
+  # Replace image with hardened-python:latest to test against the actual
+  # hardened image (run `make build IMAGE=python` first).
+  target:
+    image: python:3.12-slim
+    container_name: lab-target
+    restart: unless-stopped
+    command: sleep infinity
+    depends_on:
+      - falco

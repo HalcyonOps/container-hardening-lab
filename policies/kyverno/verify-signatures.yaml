@@ -1,0 +1,120 @@
+# policies/kyverno/verify-signatures.yaml
+#
+# Kubernetes admission policy: require images from this registry to be signed
+# with Cosign (keyless, via Sigstore).
+#
+# Apply to a cluster:
+#   kubectl apply -f policies/kyverno/verify-signatures.yaml
+#
+# Note — this policy is NOT included in tests/kyverno/kyverno-test.yaml
+# because kyverno test cannot verify signatures without live registry access.
+# The policy itself is syntactically valid and works on a live cluster.
+#
+# =============================================================================
+# Why image signing matters
+# =============================================================================
+#
+# The image-source-allowlist policy (deploy-time) and the OPA allowlist policy
+# (build-time) together ensure images come from approved registries. But neither
+# proves that the specific image was built by your CI pipeline — an attacker
+# who can push to ghcr.io (via a stolen token or a compromised account) could
+# push a malicious image with an approved registry prefix.
+#
+# Image signing closes this gap:
+#   - The signature is produced in CI using GitHub's OIDC token as identity
+#   - The signing certificate embeds the exact workflow URL and git ref
+#   - Signatures are logged to the Sigstore Rekor transparency log (append-only)
+#   - Kyverno fetches and verifies the signature at admission time
+#
+# This means a Pod using ghcr.io/r055le/container-hardening-lab-python:latest
+# will only be admitted if that specific image digest was signed by this
+# CI workflow running on refs/heads/main. An image pushed manually or from
+# a compromised workflow on a different branch will be rejected.
+#
+# =============================================================================
+# Keyless signing — how it works
+# =============================================================================
+#
+# Traditional signing uses a long-lived private key stored in a secret manager.
+# Keyless signing (Sigstore) uses short-lived certificates tied to a workload
+# identity — in this case, GitHub Actions OIDC:
+#
+#   1. CI requests a certificate from Sigstore Fulcio using the OIDC token
+#      as proof of identity (no private key stored anywhere)
+#   2. Fulcio issues a certificate valid for ~10 minutes, embedding:
+#        Subject:  https://github.com/R055LE/container-hardening-lab/
+#                  .github/workflows/ci.yml@refs/heads/main
+#        Issuer:   https://token.actions.githubusercontent.com
+#   3. cosign signs the image digest with the ephemeral key, attaches the
+#      signature + certificate to the registry
+#   4. The signature record is logged to Rekor (public, immutable log)
+#
+# Verification requires no keys — just the subject/issuer identity:
+#   cosign verify \
+#     --certificate-identity-regexp \
+#       "https://github.com/R055LE/container-hardening-lab/.github/workflows/ci.yml@refs/heads/main" \
+#     --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+#     ghcr.io/r055le/container-hardening-lab-python:latest
+#
+# =============================================================================
+# background: false
+# =============================================================================
+#
+# verifyImages rules cannot run as background scans because they must make
+# live calls to the registry and Rekor to verify the signature. Background
+# scanning evaluates resources that already exist in the cluster — those
+# images may not be available at scan time, and even if they are, Rekor
+# lookups require the original admission context. Set background: false
+# to restrict enforcement to the admission webhook only.
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: verify-image-signatures
+  annotations:
+    policies.kyverno.io/title: Verify Image Signatures
+    policies.kyverno.io/category: Supply Chain Security
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: >-
+      Images from ghcr.io/r055le/container-hardening-lab must be signed with
+      Cosign using keyless signing (Sigstore). The signature must have been
+      produced by the CI workflow at refs/heads/main. Unsigned images or
+      images signed by any other identity are rejected at admission.
+spec:
+  validationFailureAction: Enforce
+  background: false
+  rules:
+
+    # -------------------------------------------------------------------------
+    # Require Cosign signature from the CI workflow
+    # -------------------------------------------------------------------------
+    # imageReferences uses glob matching. The pattern covers all three images:
+    #   ghcr.io/r055le/container-hardening-lab-python:*
+    #   ghcr.io/r055le/container-hardening-lab-node:*
+    #   ghcr.io/r055le/container-hardening-lab-nginx:*
+    #
+    # The keyless attestor requires:
+    #   subject: the workflow URL that performed the signing
+    #   issuer:  the OIDC provider that issued the token (GitHub Actions)
+    #
+    # subject uses a regex to allow for both exact refs/heads/main matches and
+    # any future branch patterns while still binding to this specific repo and
+    # workflow file. Tighten to an exact string in production.
+    - name: verify-lab-image-signatures
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      verifyImages:
+        - imageReferences:
+            - "ghcr.io/r055le/container-hardening-lab-*"
+          attestors:
+            - count: 1
+              entries:
+                - keyless:
+                    subject: "https://github.com/R055LE/container-hardening-lab/.github/workflows/ci.yml@refs/heads/main"
+                    issuer: "https://token.actions.githubusercontent.com"
+                    rekor:
+                      url: https://rekor.sigstore.dev

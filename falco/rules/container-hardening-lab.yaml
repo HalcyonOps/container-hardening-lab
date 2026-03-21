@@ -1,0 +1,279 @@
+# falco/rules/container-hardening-lab.yaml
+#
+# Custom Falco rules for the container-hardening-lab images.
+#
+# These rules detect post-exploitation behavior inside the hardened containers.
+# The hardening controls in the Dockerfiles and Kyverno policies reduce the
+# attack surface at build and deploy time. These rules cover the runtime layer:
+# if an attacker achieves code execution inside a container despite those
+# controls, Falco alerts on the suspicious syscall patterns.
+#
+# Rule design principle: each rule targets a specific attack step in the
+# standard container escape / post-exploitation kill chain:
+#
+#   1. Shell spawned       — attacker establishes interactive access
+#   2. Package manager     — attacker installs tools (curl, nc, python, etc.)
+#   3. Sensitive file read — attacker reads credentials or password hashes
+#   4. Outbound connection — attacker contacts C2 or exfiltrates data
+#   5. Filesystem write    — attacker drops a persistence mechanism
+#      (complements readOnlyRootFilesystem; Falco alerts even if the write
+#       fails at the kernel level due to the read-only mount)
+#
+# Each rule is scoped to the lab container images so it doesn't fire on
+# unrelated containers sharing the host. Adjust the lab_images list if you
+# push to a different registry or use different local image names.
+#
+# Rule priority levels used here:
+#   WARNING  — suspicious, investigate
+#   ERROR    — high-confidence indicator of compromise
+#   CRITICAL — active attack in progress
+#
+# References:
+#   Falco rule syntax: https://falco.org/docs/rules/
+#   MITRE ATT&CK for containers: https://attack.mitre.org/matrices/enterprise/containers/
+
+# =============================================================================
+# Lists
+# =============================================================================
+
+# Local image names used during development (make build IMAGE=...)
+# Registry image names pushed by CI to ghcr.io
+- list: lab_container_images
+  items:
+    - hardened-python
+    - hardened-node
+    - hardened-nginx
+    - ghcr.io/r055le/container-hardening-lab-python
+    - ghcr.io/r055le/container-hardening-lab-node
+    - ghcr.io/r055le/container-hardening-lab-nginx
+
+# Shells we expect never to appear inside a hardened application container.
+# The images do not include bash; ash/sh may be present in Alpine-derived
+# images (nginx) but should never be spawned by the application process.
+- list: lab_shell_binaries
+  items:
+    - sh
+    - bash
+    - ash
+    - dash
+    - zsh
+    - ksh
+
+# Package managers that should never run in a production container.
+# Their presence indicates an attacker attempting to install tools.
+- list: lab_package_managers
+  items:
+    - apt
+    - apt-get
+    - apt-cache
+    - dpkg
+    - pip
+    - pip3
+    - npm
+    - yarn
+    - apk
+
+# Sensitive files that application code should never need to open for reading.
+# Reads of these files likely indicate credential harvesting or reconnaissance.
+- list: lab_sensitive_files
+  items:
+    - /etc/shadow
+    - /etc/gshadow
+    - /etc/sudoers
+    - /proc/keys
+    - /root/.ssh/id_rsa
+    - /root/.ssh/authorized_keys
+
+# =============================================================================
+# Macros
+# =============================================================================
+
+# True when the process is running inside one of the lab containers.
+# container.image.repository is the image name without the tag.
+- macro: in_lab_container
+  condition: container.image.repository in (lab_container_images)
+
+# True when the process is a shell binary.
+- macro: lab_shell_spawned
+  condition: spawned_process and proc.name in (lab_shell_binaries)
+
+# True when the process is a package manager binary.
+- macro: lab_package_manager_running
+  condition: spawned_process and proc.name in (lab_package_managers)
+
+# =============================================================================
+# Rules
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Rule 1: Shell spawned inside a hardened container
+# -----------------------------------------------------------------------------
+# MITRE ATT&CK: T1059 — Command and Scripting Interpreter
+#
+# The hardened images do not include bash and do not expose a default shell
+# entrypoint. Any shell appearing at runtime was either injected by an attacker
+# (via a reverse shell payload or a deserialization exploit) or is the result
+# of a developer running `docker exec -it <container> /bin/sh` for debugging.
+#
+# Both cases should be visible: the former is an active attack, the latter
+# indicates a process with shell access that could be exploited if compromised.
+#
+# proc.pname is the parent process name — useful for distinguishing a shell
+# spawned by the application process (suspicious) vs one spawned by the
+# container runtime (docker exec, which shows as "runc" or "containerd-shim").
+- rule: Shell Spawned in Lab Container
+  desc: >
+    A shell binary was spawned inside a hardened lab container. This may
+    indicate an attacker has achieved code execution or a developer is
+    exec-ing into a production container for debugging.
+  condition: >
+    lab_shell_spawned and
+    in_lab_container
+  output: >
+    Shell spawned in hardened container
+    (user=%user.name uid=%user.uid
+     container=%container.name image=%container.image.repository
+     shell=%proc.name parent=%proc.pname
+     cmdline=%proc.cmdline pid=%proc.pid)
+  priority: WARNING
+  tags: [container, shell, mitre_execution, T1059]
+
+# -----------------------------------------------------------------------------
+# Rule 2: Package manager executed inside a hardened container
+# -----------------------------------------------------------------------------
+# MITRE ATT&CK: T1072 — Software Deployment Tools / T1105 — Ingress Tool Transfer
+#
+# Running a package manager inside a production container typically means
+# one of two things:
+#   a) An attacker is installing attack tools (netcat, curl, python, etc.)
+#   b) The image was built incorrectly and still has a package manager
+#      (the Dockerfile's cleanup step was skipped or failed)
+#
+# In either case, the event should be investigated. The hardened images
+# explicitly remove or don't install package managers in the final stage.
+- rule: Package Manager Executed in Lab Container
+  desc: >
+    A package manager (apt, pip, npm, apk, etc.) ran inside a hardened lab
+    container. The hardened images do not include package managers in the
+    final stage — this indicates either an attacker installing tools or a
+    build regression.
+  condition: >
+    lab_package_manager_running and
+    in_lab_container
+  output: >
+    Package manager executed in hardened container
+    (user=%user.name uid=%user.uid
+     container=%container.name image=%container.image.repository
+     cmd=%proc.name cmdline=%proc.cmdline pid=%proc.pid
+     parent=%proc.pname)
+  priority: ERROR
+  tags: [container, package_manager, mitre_execution, T1105]
+
+# -----------------------------------------------------------------------------
+# Rule 3: Sensitive file opened for reading
+# -----------------------------------------------------------------------------
+# MITRE ATT&CK: T1552.001 — Credentials in Files
+#
+# /etc/shadow contains hashed passwords for local accounts. Application code
+# has no legitimate reason to read it. A read of /etc/shadow inside a
+# container indicates credential harvesting — likely by an attacker who has
+# already achieved code execution and is attempting to escalate or pivot.
+#
+# evt.type = open catches both open() and openat() syscalls.
+# evt.arg.flags contains O_RDONLY (0) for read-only opens.
+- rule: Sensitive File Read in Lab Container
+  desc: >
+    A sensitive system file was opened for reading inside a hardened lab
+    container. Application processes have no legitimate need to read password
+    hashes, SSH keys, or sudoers files.
+  condition: >
+    open_read and
+    in_lab_container and
+    fd.name in (lab_sensitive_files)
+  output: >
+    Sensitive file opened for reading in hardened container
+    (user=%user.name uid=%user.uid
+     container=%container.name image=%container.image.repository
+     file=%fd.name proc=%proc.name cmdline=%proc.cmdline pid=%proc.pid)
+  priority: ERROR
+  tags: [container, filesystem, credentials, mitre_credential_access, T1552]
+
+# -----------------------------------------------------------------------------
+# Rule 4: Unexpected outbound connection from a hardened container
+# -----------------------------------------------------------------------------
+# MITRE ATT&CK: T1071 — Application Layer Protocol / T1041 — Exfiltration Over C2
+#
+# The hardened web server containers (python, node, nginx) are expected to
+# receive inbound connections on their service ports. They are NOT expected to
+# initiate outbound TCP connections to arbitrary internet addresses.
+#
+# An outbound connection from a hardened container to an unexpected destination
+# may indicate:
+#   - A reverse shell connecting back to an attacker's C2 server
+#   - Data exfiltration (credentials, environment variables, secrets)
+#   - A supply-chain compromise in a dependency that beacons home
+#
+# This rule intentionally excludes connections to localhost (127.0.0.0/8)
+# and the private RFC 1918 ranges to avoid alerting on internal service mesh
+# traffic, health checks, and database connections on the local network.
+# Adjust fd.rip.name or add an allowed_outbound_destinations list for your
+# environment.
+- rule: Unexpected Outbound Connection from Lab Container
+  desc: >
+    A hardened lab container initiated an outbound TCP connection to an
+    external address. These containers are intended to serve traffic, not
+    initiate it. Outbound connections may indicate a reverse shell, C2
+    beacon, or data exfiltration attempt.
+  condition: >
+    outbound and
+    in_lab_container and
+    not fd.rip in (127.0.0.1) and
+    not fd.rip.name = "localhost"
+  output: >
+    Unexpected outbound connection from hardened container
+    (user=%user.name uid=%user.uid
+     container=%container.name image=%container.image.repository
+     proc=%proc.name cmdline=%proc.cmdline pid=%proc.pid
+     connection=%fd.name rip=%fd.rip rport=%fd.rport)
+  priority: WARNING
+  tags: [container, network, mitre_command_and_control, T1071]
+
+# -----------------------------------------------------------------------------
+# Rule 5: Write to filesystem in a hardened container
+# -----------------------------------------------------------------------------
+# MITRE ATT&CK: T1564 — Hide Artifacts / T1036 — Masquerading
+#
+# All lab containers are deployed with readOnlyRootFilesystem: true in the
+# Kyverno policy. The kernel will reject write syscalls to the root filesystem,
+# so most writes will fail at the kernel level before Falco sees them.
+#
+# This rule alerts on the attempt regardless. Two reasons:
+#   1. If a container is running WITHOUT the Kyverno policy (e.g., on a
+#      misconfigured node or in a dev environment), Falco is the last line
+#      of defence against file drops.
+#   2. Writable tmpfs mounts (emptyDir volumes) are explicitly allowed by
+#      policy and will produce write events. This rule helps distinguish
+#      writes to expected temp paths from writes to unexpected paths.
+#
+# The rule excludes common writable paths (/tmp, /dev, /proc) to reduce
+# noise from legitimate application writes to temp directories.
+- rule: Filesystem Write in Lab Container
+  desc: >
+    A process inside a hardened lab container attempted to write to the
+    filesystem. With readOnlyRootFilesystem: true, most writes will fail —
+    but this rule catches attempts to write outside expected temp directories,
+    which may indicate an attacker trying to drop a persistence mechanism.
+  condition: >
+    open_write and
+    in_lab_container and
+    not fd.name startswith /tmp and
+    not fd.name startswith /dev and
+    not fd.name startswith /proc and
+    not fd.name startswith /run
+  output: >
+    Filesystem write attempt in hardened container
+    (user=%user.name uid=%user.uid
+     container=%container.name image=%container.image.repository
+     file=%fd.name proc=%proc.name cmdline=%proc.cmdline pid=%proc.pid)
+  priority: WARNING
+  tags: [container, filesystem, mitre_persistence, T1564]

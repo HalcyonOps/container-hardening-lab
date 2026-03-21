@@ -8,6 +8,8 @@ on:
 permissions:
   contents: read
   security-events: write   # required for uploading SARIF to GitHub Security tab
+  packages: write          # required for pushing images to ghcr.io
+  id-token: write          # required for keyless Cosign signing via Sigstore OIDC
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -185,6 +187,59 @@ jobs:
 
       - name: Run structure tests
         run: make test-structure IMAGE=${{ matrix.image }}
+
+      # -----------------------------------------------------------------------
+      # Push to GitHub Container Registry and sign with Cosign (keyless)
+      #
+      # Only runs on pushes to the main/master branch. Pull requests from forks
+      # do not have packages:write or id-token:write access, so these steps
+      # are intentionally skipped for PRs.
+      #
+      # Image naming: ghcr.io/<owner>/container-hardening-lab-<image>:latest
+      # The push step captures the digest produced by `docker push` — signing
+      # the digest (not the tag) ensures the signature is tamper-evident.
+      # Tags are mutable; digests are not.
+      #
+      # Keyless signing flow:
+      #   1. cosign requests a certificate from Sigstore Fulcio using the
+      #      GitHub Actions OIDC token as proof of identity
+      #   2. Fulcio issues a short-lived certificate embedding the workflow URL
+      #      as the subject: .github/workflows/ci.yml@refs/heads/main
+      #   3. cosign uploads the signature + certificate to the Sigstore Rekor
+      #      transparency log (immutable, append-only)
+      #   4. The signature is stored in the registry alongside the image
+      #
+      # Verification (no key required):
+      #   cosign verify \
+      #     --certificate-identity-regexp \
+      #       "https://github.com/R055LE/container-hardening-lab/.github/workflows/ci.yml@refs/heads/main" \
+      #     --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+      #     ghcr.io/${{ github.repository_owner }}/container-hardening-lab-<image>:latest
+      # -----------------------------------------------------------------------
+      - name: Log in to GitHub Container Registry
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tag and push to ghcr.io
+        if: github.event_name == 'push'
+        id: push
+        run: |
+          IMAGE_REF="ghcr.io/${{ github.repository_owner }}/container-hardening-lab-${{ matrix.image }}:latest"
+          docker tag "hardened-${{ matrix.image }}:latest" "$IMAGE_REF"
+          docker push "$IMAGE_REF"
+          echo "image_ref=$IMAGE_REF" >> "$GITHUB_OUTPUT"
+
+      - name: Install Cosign
+        if: github.event_name == 'push'
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign image with Cosign (keyless)
+        if: github.event_name == 'push'
+        run: cosign sign --yes "${{ steps.push.outputs.image_ref }}"
 
       # -----------------------------------------------------------------------
       # Upload all reports as a build artifact
