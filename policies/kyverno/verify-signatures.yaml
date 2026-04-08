@@ -43,7 +43,7 @@
 #      as proof of identity (no private key stored anywhere)
 #   2. Fulcio issues a certificate valid for ~10 minutes, embedding:
 #        Subject:  https://github.com/R055LE/container-hardening-lab/
-#                  .github/workflows/ci.yml@refs/heads/main
+#                  .github/workflows/container-security.yml@refs/heads/main
 #        Issuer:   https://token.actions.githubusercontent.com
 #   3. cosign signs the image digest with the ephemeral key, attaches the
 #      signature + certificate to the registry
@@ -52,7 +52,7 @@
 # Verification requires no keys — just the subject/issuer identity:
 #   cosign verify \
 #     --certificate-identity-regexp \
-#       "https://github.com/R055LE/container-hardening-lab/.github/workflows/ci.yml@refs/heads/main" \
+#       "https://github.com/R055LE/container-hardening-lab/.github/workflows/container-security.yml@refs/heads/main" \
 #     --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
 #     ghcr.io/r055le/container-hardening-lab-python:latest
 #
@@ -114,7 +114,7 @@ spec:
             - count: 1
               entries:
                 - keyless:
-                    subject: "https://github.com/R055LE/container-hardening-lab/.github/workflows/ci.yml@refs/heads/main"
+                    subject: "https://github.com/R055LE/container-hardening-lab/.github/workflows/container-security.yml@refs/heads/main"
                     issuer: "https://token.actions.githubusercontent.com"
                     rekor:
                       url: https://rekor.sigstore.dev

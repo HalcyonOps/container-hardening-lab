@@ -45,7 +45,7 @@ SBOM_FORMATS   := cyclonedx-json spdx-json
 # ---------------------------------------------------------------------------
 # Phony targets
 # ---------------------------------------------------------------------------
-.PHONY: all build scan sbom lint test test-opa test-kyverno test-structure clean help $(ALL_IMAGES)
+.PHONY: all build scan sbom lint test test-all test-opa test-kyverno test-falco test-structure clean help $(ALL_IMAGES)
 
 # ---------------------------------------------------------------------------
 # all: full pipeline for every (or one) image
@@ -125,9 +125,16 @@ lint:  ## Run Conftest OPA policies against Dockerfile(s). Use IMAGE=<name> for 
 	done
 
 # ---------------------------------------------------------------------------
-# test: run all test layers
+# test: fast policy tests — no Docker required
 # ---------------------------------------------------------------------------
-test: test-opa test-kyverno  ## Run all tests (OPA unit + Kyverno). Add IMAGE=python for structure tests.
+test: test-opa test-kyverno  ## Run policy tests only (OPA + Kyverno). No Docker required.
+	@echo ""
+	@echo "==> Policy tests passed."
+
+# ---------------------------------------------------------------------------
+# test-all: all test layers including Docker-dependent tests
+# ---------------------------------------------------------------------------
+test-all: test-opa test-kyverno test-falco  ## Run all tests including Falco validation (requires Docker).
 	@echo ""
 	@echo "==> All tests passed."
 
@@ -165,6 +172,20 @@ test-kyverno:  ## Run Kyverno policy tests against fixture manifests (requires: 
 	@echo ""
 	@echo "==> Kyverno policy tests"
 	kyverno test $(TESTS_DIR)/kyverno/ --detailed-results
+
+# ---------------------------------------------------------------------------
+# test-falco: validate Falco custom rules (syntax, macros, field references)
+# ---------------------------------------------------------------------------
+test-falco:  ## Validate Falco custom rules load without errors (requires: docker).
+	@echo ""
+	@echo "==> Falco rule validation"
+	docker run --rm \
+	    -v "$(CURDIR)/falco/rules:/etc/falco/rules.d:ro" \
+	    falcosecurity/falco:latest \
+	    falco --dry-run \
+	          -r /etc/falco/falco_rules.yaml \
+	          -r /etc/falco/rules.d/container-hardening-lab.yaml
+	@echo "    Falco rules validated successfully."
 
 # ---------------------------------------------------------------------------
 # test-structure: container structure tests (image must be built first)

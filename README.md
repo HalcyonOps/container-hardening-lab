@@ -1,6 +1,6 @@
 # Container Hardening Lab
 
-[![CI](https://github.com/R055LE/container-hardening-lab/actions/workflows/ci.yml/badge.svg)](https://github.com/R055LE/container-hardening-lab/actions/workflows/ci.yml)
+[![Container Security Pipeline](https://github.com/R055LE/container-hardening-lab/actions/workflows/container-security.yml/badge.svg)](https://github.com/R055LE/container-hardening-lab/actions/workflows/container-security.yml)
 
 A portfolio project demonstrating production-grade container hardening, vulnerability scanning, and policy-as-code enforcement — aligned with the [CIS Docker Benchmark](https://www.cisecurity.org/benchmark/docker) and [DoD Iron Bank](https://ironbank.dso.mil/) practices.
 
@@ -9,7 +9,7 @@ A portfolio project demonstrating production-grade container hardening, vulnerab
 This lab addresses the most common container security failures in production:
 
 - **Containers running as root** — every image in this repo uses a dedicated non-root user (UID 10001)
-- **Bloated attack surface** — multi-stage builds strip build tooling; `wget`, `curl`, `perl`, SUID/SGID binaries are explicitly removed
+- **Bloated attack surface** — multi-stage builds strip build tooling; `wget`, `curl`, `perl`, SUID/SGID binaries are explicitly removed; the Go image uses distroless (no shell, no package manager, no libc)
 - **Unpinned or untrusted base images** — an OPA allowlist enforces approved registries and warns on unpinned digests
 - **No admission control** — Kyverno ClusterPolicies block privileged pods, host namespace sharing, and missing capability drops at deploy time
 - **No evidence trail** — every image ships a CycloneDX + SPDX SBOM and a Trivy CVE report; findings gate the CI build
@@ -23,7 +23,8 @@ This lab addresses the most common container security failures in production:
 ├── images/
 │   ├── python/               # python:3.12-slim — reference hardened image
 │   ├── node/                 # node:20-slim — Express API
-│   └── nginx/                # nginx:1.27-alpine — static file server
+│   ├── nginx/                # nginx:1.27-alpine — static file server
+│   └── go/                   # distroless — statically compiled Go binary
 │
 ├── policies/
 │   ├── opa/                  # Rego policies evaluated by Conftest against Dockerfiles
@@ -47,7 +48,7 @@ This lab addresses the most common container security failures in production:
 │   ├── rules/                # Custom Falco runtime detection rules
 │   └── docker-compose.yml    # Local Falco demo setup
 │
-├── .github/workflows/ci.yml  # Full CI pipeline
+├── .github/workflows/container-security.yml  # Full CI pipeline
 └── Makefile                  # Primary task interface
 ```
 
@@ -69,7 +70,7 @@ All images apply the following controls, mapped to CIS Docker Benchmark sections
 
 ## Test Layers
 
-The test suite has three independent layers, each catching a different class of failure:
+The test suite has four independent layers, each catching a different class of failure:
 
 ### 1. OPA Unit Tests — policy logic
 
@@ -107,21 +108,32 @@ make test-kyverno
 | `hostPID/hostIPC/hostNetwork` blocked | 3 fixture files | Deny |
 | Fully hardened pod | `pod-pass-hardened.yaml` | Pass |
 
-### 3. Container Structure Tests — runtime assertions
+### 3. Falco Rule Validation — runtime detection rules
+
+Validates that the custom Falco rules load without errors — syntax, macro/list resolution, and field references are all checked. Uses the Falco container so no kernel access is needed.
+
+```bash
+make test-falco
+```
+
+Validates all 5 custom rules in `falco/rules/container-hardening-lab.yaml` against Falco's rule engine. Catches YAML parse errors, invalid condition syntax, undefined macros/lists, and unrecognised field names.
+
+### 4. Container Structure Tests — runtime assertions
 
 Tests the actual built image at runtime using `container-structure-test`. These catch regressions that only manifest after the image is built — e.g., a package manager silently re-adding a SUID binary.
 
 ```bash
-make test-structure IMAGE=python   # or node, nginx
+make test-structure IMAGE=python   # or node, nginx, go
 ```
 
-41 tests across three images:
+53 tests across four images:
 
 | Image | Tests | Checks |
 |---|---|---|
 | `hardened-python` | 14 | UID 10001, no SUID/SGID, no wget/curl/perl/gcc, `/app` workdir, nologin shell, OCI labels |
 | `hardened-node` | 14 | UID 10001, no SUID/SGID, no wget/curl/perl, Express importable, `src/index.js` present, OCI labels |
 | `hardened-nginx` | 13 | UID 101, no SUID/SGID, no wget/curl, `server_tokens off`, port 8080, security headers, OCI labels |
+| `hardened-go` | 12 | UID 65532, no shell/bash, no wget/curl/apt/apk/gcc/go, CA certs present, OCI labels (distroless) |
 
 ## Failure Demo
 
@@ -138,6 +150,8 @@ WARN - examples/unhardened/Dockerfile - docker.security - Image 'node:18' is not
 
 Trivy separately flags `node:18` as carrying CRITICAL/HIGH CVEs (the image is intentionally pinned to an old, vulnerable release).
 
+Negative structure tests (`tests/structure/unhardened.yaml`) then build the image and assert it **has** the problems the hardened images eliminate — running as root (UID 0), SUID binaries present, wget/curl/perl/apt-get all installed. This makes the before/after contrast concrete and testable.
+
 ## Prerequisites
 
 | Tool | Version | Install |
@@ -153,8 +167,11 @@ Trivy separately flags `node:18` as carrying CRITICAL/HIGH CVEs (the image is in
 ## Quick Start
 
 ```bash
-# Run all policy and admission tests (no Docker required)
+# Run policy tests only — no Docker required, fast feedback
 make test
+
+# Run all tests including Falco rule validation (requires Docker)
+make test-all
 
 # Build, scan, and generate SBOMs for all images
 make all
@@ -163,6 +180,7 @@ make all
 make test-structure IMAGE=python
 make test-structure IMAGE=node
 make test-structure IMAGE=nginx
+make test-structure IMAGE=go
 
 # Individual targets for a single image
 make build IMAGE=python
@@ -182,13 +200,13 @@ reports/python/
 
 ## CI Pipeline
 
-The GitHub Actions workflow (`.github/workflows/ci.yml`) runs three jobs on every push and pull request:
+The GitHub Actions workflow (`.github/workflows/container-security.yml`) runs three jobs on every push and pull request:
 
 ```mermaid
 flowchart TD
     trigger([push / pull_request]):::event --> pt
 
-    pt["**policy-tests**\nOPA unit tests — 46\nKyverno policy tests — 13"]:::job
+    pt["**policy-tests**\nOPA unit tests — 46\nKyverno policy tests — 13\nFalco rule validation — 5 rules"]:::job
 
     pt --> fd
     pt --> ip
@@ -199,7 +217,7 @@ flowchart TD
         f2["Trivy must find CVEs\nin node:18"]:::check
     end
 
-    subgraph ip ["  image-pipeline — python · node · nginx (parallel)  "]
+    subgraph ip ["  image-pipeline — python · node · nginx · go (parallel)  "]
         direction TB
         i1["Lint Dockerfile\nConftest / OPA"]:::step --> i2
         i2["Build image"]:::step --> i3
@@ -222,7 +240,7 @@ flowchart TD
     classDef sign   fill:#8b5cf6,stroke:#7c3aed,color:#fff
 ```
 
-**`policy-tests`** runs first with no Docker dependency — fast feedback on every push.
+**`policy-tests`** runs first — fast feedback on every push. OPA and Kyverno tests need no Docker; Falco validation uses the Falco container image to validate rule syntax and field references.
 
 **`failure-demo`** asserts that the unhardened Dockerfile and `node:18` base image are correctly flagged. A clean result here fails the job, proving the tooling is live.
 
@@ -237,7 +255,7 @@ Verify a signed image (no key required):
 ```bash
 cosign verify \
   --certificate-identity-regexp \
-    "https://github.com/R055LE/container-hardening-lab/.github/workflows/ci.yml@refs/heads/main" \
+    "https://github.com/R055LE/container-hardening-lab/.github/workflows/container-security.yml@refs/heads/main" \
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
   ghcr.io/r055le/container-hardening-lab-python:latest
 ```

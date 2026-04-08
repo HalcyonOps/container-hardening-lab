@@ -1,0 +1,86 @@
+# tests/structure/go.yaml
+# Container structure tests for the hardened Go image (distroless).
+#
+# Run (after building the image):
+#   container-structure-test test \
+#     --image hardened-go:latest \
+#     --config tests/structure/go.yaml
+#
+# Note: distroless has no shell, so commandTests using "sh -c" are not
+# possible. Assertions rely on fileExistenceTests and metadataTest instead.
+
+schemaVersion: "2.0.0"
+
+# ---------------------------------------------------------------------------
+# Metadata tests: image-level properties
+# ---------------------------------------------------------------------------
+metadataTest:
+  # CIS 4.1: image must declare a non-root user
+  user: "nonroot"
+  # Only port 8080 should be exposed
+  exposedPorts:
+    - "8080"
+  # Labels must include OCI standard fields
+  labels:
+    - key: "org.opencontainers.image.title"
+      value: "hardened-go"
+    - key: "org.opencontainers.image.vendor"
+      value: "container-hardening-lab"
+    - key: "org.opencontainers.image.base.name"
+      value: "gcr.io/distroless/static-debian12:nonroot"
+
+# ---------------------------------------------------------------------------
+# File existence tests: binary present, attack-surface tools absent
+# ---------------------------------------------------------------------------
+fileExistenceTests:
+
+  # Application binary must exist
+  - name: "application binary exists"
+    path: "/app"
+    shouldExist: true
+
+  # Distroless must not contain a shell
+  - name: "no /bin/sh (distroless)"
+    path: "/bin/sh"
+    shouldExist: false
+
+  - name: "no /bin/bash"
+    path: "/bin/bash"
+    shouldExist: false
+
+  # CIS 4.7: no download utilities
+  - name: "no wget"
+    path: "/usr/bin/wget"
+    shouldExist: false
+
+  - name: "no curl"
+    path: "/usr/bin/curl"
+    shouldExist: false
+
+  # No package managers — distroless has none by design
+  - name: "no apt-get"
+    path: "/usr/bin/apt-get"
+    shouldExist: false
+
+  - name: "no apk"
+    path: "/sbin/apk"
+    shouldExist: false
+
+  # No compiler toolchain leaked from builder
+  - name: "no go binary"
+    path: "/usr/local/go/bin/go"
+    shouldExist: false
+
+  - name: "no gcc"
+    path: "/usr/bin/gcc"
+    shouldExist: false
+
+  # CA certificates must be present (required for HTTPS client calls)
+  - name: "CA certificates present"
+    path: "/etc/ssl/certs/ca-certificates.crt"
+    shouldExist: true
+
+  # /root should not have SSH keys
+  - name: "/root/.ssh does not exist"
+    path: "/root/.ssh"
+    shouldExist: false

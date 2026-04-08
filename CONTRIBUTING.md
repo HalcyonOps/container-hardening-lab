@@ -31,8 +31,11 @@ make test-opa
 # Kyverno admission policy tests (13 tests)
 make test-kyverno
 
-# Both at once
+# Both at once (fast, no Docker)
 make test
+
+# All tests including Falco rule validation (requires Docker)
+make test-all
 ```
 
 ### Image pipeline — requires Docker
@@ -128,7 +131,7 @@ See [docs/adding-an-image.md](docs/adding-an-image.md) for a full walkthrough. T
 2. Verify `make lint IMAGE=<name>` passes
 3. Verify `make scan IMAGE=<name>` exits 0 (no CRITICAL/HIGH CVEs)
 4. Write `tests/structure/<name>.yaml` and verify `make test-structure IMAGE=<name>` passes
-5. Add `<name>` to the matrix in `.github/workflows/ci.yml`
+5. Add `<name>` to the matrix in `.github/workflows/container-security.yml`
 6. Write `images/<name>/README.md` documenting the hardening decisions
 
 ---
@@ -157,11 +160,12 @@ Every pull request must pass all CI jobs before merging:
 
 | Job | What it checks |
 |---|---|
-| `policy-tests` | OPA unit tests (46) + Kyverno policy tests (13) |
+| `policy-tests` | OPA unit tests (46) + Kyverno policy tests (13) + Falco rule validation (5 rules) |
 | `failure-demo` | Conftest must reject `examples/unhardened/Dockerfile`; Trivy must find CVEs in `node:18` |
 | `image-pipeline (python)` | Lint → Build → Trivy scan (0 CRITICAL/HIGH) → SBOM → Structure tests (14) |
 | `image-pipeline (node)` | Lint → Build → Trivy scan (0 CRITICAL/HIGH) → SBOM → Structure tests (14) |
 | `image-pipeline (nginx)` | Lint → Build → Trivy scan (0 CRITICAL/HIGH) → SBOM → Structure tests (13) |
+| `image-pipeline (go)` | Lint → Build → Trivy scan (0 CRITICAL/HIGH) → SBOM → Structure tests (12) |
 
 A Trivy scan that finds CRITICAL or HIGH CVEs will fail the pipeline. If a CVE has no fix available and the code path is not exploitable in this container, add it to the image's `.trivyignore` with a justification comment — do not suppress CVEs without documented reasoning.
 

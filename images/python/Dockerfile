@@ -3,7 +3,7 @@
 # Install dependencies in a throwaway stage so build tooling never reaches
 # the final image. This reduces attack surface and final image size.
 # =============================================================================
-FROM python:3.12-slim AS builder
+FROM python:3.12-slim@sha256:e31013b9573989b2dc2f0cb688044c9e650c2721dd52c54d0fd3c669d3548bb6 AS builder
 
 WORKDIR /build
 
@@ -20,7 +20,7 @@ RUN mkdir -p /install && pip install --no-cache-dir --prefix=/install -r require
 # Stage 2: final
 # Minimal runtime image with no build tooling.
 # =============================================================================
-FROM python:3.12-slim AS final
+FROM python:3.12-slim@sha256:e31013b9573989b2dc2f0cb688044c9e650c2721dd52c54d0fd3c669d3548bb6 AS final
 
 # --- OCI / CIS 4.1: Apply standard labels ---------------------------------
 LABEL org.opencontainers.image.title="hardened-python" \

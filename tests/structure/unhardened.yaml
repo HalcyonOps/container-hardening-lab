@@ -1,0 +1,93 @@
+# tests/structure/unhardened.yaml
+# Negative structure tests for the deliberately insecure image.
+#
+# These tests assert that the unhardened image HAS the problems that
+# the hardened images eliminate. If any of these tests fail, it means
+# the unhardened image accidentally got safer — which would weaken
+# the before/after comparison this lab demonstrates.
+#
+# Run (after building the unhardened image):
+#   container-structure-test test \
+#     --image unhardened:latest \
+#     --config tests/structure/unhardened.yaml
+
+schemaVersion: "2.0.0"
+
+# ---------------------------------------------------------------------------
+# Metadata: image runs as root (no USER instruction)
+# ---------------------------------------------------------------------------
+metadataTest:
+  user: ""
+  exposedPorts:
+    - "80"
+
+# ---------------------------------------------------------------------------
+# Command tests: prove the attack surface exists
+# ---------------------------------------------------------------------------
+commandTests:
+
+  # No USER instruction → process runs as root (UID 0)
+  - name: "runs as root (UID 0)"
+    command: "id"
+    expectedOutput:
+      - "uid=0"
+
+  # SUID binaries are present (no stripping step in Dockerfile)
+  - name: "SUID binaries present"
+    command: "sh"
+    args: ["-c", "find / -xdev -perm /4000 2>/dev/null | wc -l | tr -d ' \n'"]
+    excludedOutput:
+      - "^0$"
+
+  # wget is installed and functional
+  - name: "wget is available"
+    command: "which"
+    args: ["wget"]
+    expectedOutput:
+      - "/usr/bin/wget"
+
+  # curl is installed and functional
+  - name: "curl is available"
+    command: "which"
+    args: ["curl"]
+    expectedOutput:
+      - "/usr/bin/curl"
+
+  # Package manager is fully functional — attacker can install tools
+  - name: "apt-get is available"
+    command: "which"
+    args: ["apt-get"]
+    expectedOutput:
+      - "/usr/bin/apt-get"
+
+  # perl is present — common attack tool for one-liner exploits
+  - name: "perl is available"
+    command: "which"
+    args: ["perl"]
+    expectedOutput:
+      - "/usr/bin/perl"
+
+# ---------------------------------------------------------------------------
+# File existence tests: attack-surface tools that should NOT be here
+# ---------------------------------------------------------------------------
+fileExistenceTests:
+
+  # wget binary present (removed in hardened images)
+  - name: "wget binary exists"
+    path: "/usr/bin/wget"
+    shouldExist: true
+
+  # curl binary present (removed in hardened images)
+  - name: "curl binary exists"
+    path: "/usr/bin/curl"
+    shouldExist: true
+
+  # Full package manager present
+  - name: "apt-get binary exists"
+    path: "/usr/bin/apt-get"
+    shouldExist: true
+
+  # perl binary present (removed in hardened images)
+  - name: "perl binary exists"
+    path: "/usr/bin/perl"
+    shouldExist: true

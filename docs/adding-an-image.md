@@ -241,7 +241,7 @@ Create `images/go/README.md` following the pattern in [images/python/README.md](
 [ ] images/go/.dockerignore       — excludes local build artifacts
 [ ] tests/structure/go.yaml       — runtime assertions, make test-structure passes
 [ ] images/go/README.md           — documents decisions and usage
-[ ] .github/workflows/ci.yml      — go added to matrix
+[ ] .github/workflows/container-security.yml      — go added to matrix
 [ ] make build IMAGE=go           — builds successfully
 [ ] make scan  IMAGE=go           — 0 CRITICAL/HIGH CVEs
 [ ] make sbom  IMAGE=go           — SBOM generated

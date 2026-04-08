@@ -6,7 +6,7 @@
 # `npm run build` before this stage; see images/node/Dockerfile for the
 # multi-stage pattern.
 # =============================================================================
-FROM nginx:1.27-alpine AS final
+FROM nginx:1.27-alpine@sha256:62223d644fa234c3a1cc785ee14242ec47a77364226f1c811d2f669f96dc2ac8 AS final
 
 LABEL org.opencontainers.image.title="hardened-nginx" \
       org.opencontainers.image.description="CIS-hardened nginx 1.27 static file server" \

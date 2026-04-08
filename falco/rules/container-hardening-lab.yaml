@@ -43,9 +43,11 @@
     - hardened-python
     - hardened-node
     - hardened-nginx
+    - hardened-go
     - ghcr.io/r055le/container-hardening-lab-python
     - ghcr.io/r055le/container-hardening-lab-node
     - ghcr.io/r055le/container-hardening-lab-nginx
+    - ghcr.io/r055le/container-hardening-lab-go
 
 # Shells we expect never to appear inside a hardened application container.
 # The images do not include bash; ash/sh may be present in Alpine-derived

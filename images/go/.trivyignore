@@ -1,0 +1,6 @@
+# Accepted CVEs for the hardened Go image.
+# Format:
+#   # CVE-YYYY-NNNNN — reason this is accepted
+#   # Exploitability: <assessment>
+#   # Review by: YYYY-MM-DD
+#   CVE-YYYY-NNNNN

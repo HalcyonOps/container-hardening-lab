@@ -1,4 +1,4 @@
-name: CI
+name: Container Security Pipeline
 
 on:
   push:
@@ -16,7 +16,7 @@ jobs:
   # Job 1: Policy tests — no Docker required, fast feedback on every push.
   # ---------------------------------------------------------------------------
   policy-tests:
-    name: Policy tests (OPA + Kyverno)
+    name: Policy tests (OPA + Kyverno + Falco)
     runs-on: ubuntu-latest
 
     steps:
@@ -35,11 +35,8 @@ jobs:
             | tar xz -C /tmp kyverno && mv /tmp/kyverno /usr/local/bin/kyverno
           kyverno version
 
-      - name: OPA unit tests
-        run: make test-opa
-
-      - name: Kyverno policy tests
-        run: make test-kyverno
+      - name: All policy and rule tests (OPA + Kyverno + Falco)
+        run: make test-all
 
   # ---------------------------------------------------------------------------
   # Job 2: Failure demo — show that the scanner and linter correctly reject
@@ -95,6 +92,28 @@ jobs:
           fi
           echo "PASS: Trivy correctly found CVEs in node:18."
 
+      # Build the unhardened image and run negative structure tests against it.
+      # These assert the image HAS the problems the hardened images eliminate:
+      # runs as root, SUID binaries present, wget/curl/perl/apt-get installed.
+      - name: Install container-structure-test
+        run: |
+          curl -sL https://github.com/GoogleContainerTools/container-structure-test/releases/download/v1.19.3/container-structure-test-linux-amd64 \
+            -o /usr/local/bin/container-structure-test
+          chmod +x /usr/local/bin/container-structure-test
+
+      - name: Build unhardened image
+        run: |
+          docker build \
+            --tag unhardened:latest \
+            --file examples/unhardened/Dockerfile \
+            examples/unhardened/
+
+      - name: Negative structure tests (unhardened image has expected problems)
+        run: |
+          container-structure-test test \
+            --image unhardened:latest \
+            --config tests/structure/unhardened.yaml
+
   # ---------------------------------------------------------------------------
   # Job 3: Image pipeline — build, lint, scan, SBOM, structure test.
   # Only runs after policy-tests passes.
@@ -107,7 +126,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: [python, node, nginx]
+        image: [python, node, nginx, go]
 
     steps:
       - uses: actions/checkout@v4
@@ -204,7 +223,7 @@ jobs:
       #   1. cosign requests a certificate from Sigstore Fulcio using the
       #      GitHub Actions OIDC token as proof of identity
       #   2. Fulcio issues a short-lived certificate embedding the workflow URL
-      #      as the subject: .github/workflows/ci.yml@refs/heads/main
+      #      as the subject: .github/workflows/container-security.yml@refs/heads/main
       #   3. cosign uploads the signature + certificate to the Sigstore Rekor
       #      transparency log (immutable, append-only)
       #   4. The signature is stored in the registry alongside the image
@@ -212,7 +231,7 @@ jobs:
       # Verification (no key required):
       #   cosign verify \
       #     --certificate-identity-regexp \
-      #       "https://github.com/R055LE/container-hardening-lab/.github/workflows/ci.yml@refs/heads/main" \
+      #       "https://github.com/R055LE/container-hardening-lab/.github/workflows/container-security.yml@refs/heads/main" \
       #     --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
       #     ghcr.io/${{ github.repository_owner }}/container-hardening-lab-<image>:latest
       # -----------------------------------------------------------------------
@@ -231,8 +250,11 @@ jobs:
           OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
           IMAGE_REF="ghcr.io/${OWNER}/container-hardening-lab-${{ matrix.image }}:latest"
           docker tag "hardened-${{ matrix.image }}:latest" "$IMAGE_REF"
-          docker push "$IMAGE_REF"
+          # Capture the immutable digest from docker push — tags are mutable,
+          # so signing the digest (not the tag) ensures tamper-evidence.
+          DIGEST=$(docker push "$IMAGE_REF" | grep -oP 'digest: \Ksha256:[a-f0-9]+')
           echo "image_ref=$IMAGE_REF" >> "$GITHUB_OUTPUT"
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
 
       - name: Install Cosign
         if: github.event_name == 'push'
@@ -240,7 +262,12 @@ jobs:
 
       - name: Sign image with Cosign (keyless)
         if: github.event_name == 'push'
-        run: cosign sign --yes "${{ steps.push.outputs.image_ref }}"
+        run: |
+          IMAGE_REF="${{ steps.push.outputs.image_ref }}"
+          DIGEST="${{ steps.push.outputs.digest }}"
+          # Sign by digest — the immutable content-addressable identifier.
+          # This binds the signature to the exact image bytes, not a mutable tag.
+          cosign sign --yes "${IMAGE_REF%%:*}@${DIGEST}"
 
       # -----------------------------------------------------------------------
       # Upload all reports as a build artifact

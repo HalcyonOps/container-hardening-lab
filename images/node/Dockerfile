@@ -6,7 +6,7 @@
 # the final image. Only the resulting node_modules and application source
 # are promoted to stage 2.
 # =============================================================================
-FROM node:20-slim AS builder
+FROM node:20-slim@sha256:677c9bc72e8f52777aa42241fdb12a0aa87dc23f76299871686443907619f767 AS builder
 
 WORKDIR /build
 
@@ -32,7 +32,7 @@ COPY . .
 # Minimal runtime image. Contains only: node binary, application source,
 # production node_modules. No npm, no package manager, no build tooling.
 # =============================================================================
-FROM node:20-slim AS final
+FROM node:20-slim@sha256:677c9bc72e8f52777aa42241fdb12a0aa87dc23f76299871686443907619f767 AS final
 
 LABEL org.opencontainers.image.title="hardened-node" \
       org.opencontainers.image.description="CIS-hardened Node.js 20 runtime" \
