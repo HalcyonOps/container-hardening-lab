@@ -80,7 +80,7 @@ Distroless images carry near-zero CVEs because there are almost no OS packages t
 ## Using this as a base pattern
 
 ```dockerfile
-FROM golang:1.24-bookworm AS builder
+FROM golang:1.26-bookworm AS builder
 WORKDIR /build
 COPY go.mod go.sum ./
 RUN go mod download

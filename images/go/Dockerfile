@@ -2,7 +2,7 @@
 # Stage 1 — builder
 # Compile the Go binary. The Go toolchain never reaches the final image.
 # =============================================================================
-FROM golang:1.24-bookworm@sha256:98d673f18a1aac43da744209873cb79323e11706f909251bcfb131828b95559d AS builder
+FROM golang:1.26-bookworm@sha256:b6c3f6b2881231dda32428740ea934e556614756b76a6c23129c9d85c3af4630 AS builder
 
 WORKDIR /build
 

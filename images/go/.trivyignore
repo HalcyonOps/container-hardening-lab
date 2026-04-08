@@ -4,10 +4,3 @@
 #   # Exploitability: <assessment>
 #   # Review by: YYYY-MM-DD
 #   CVE-YYYY-NNNNN
-
-# stdlib (net/url) — incorrect parsing of IPv6 host literals.
-# Fixed in Go 1.25.8 and 1.26.1 but no patch available for 1.24.x.
-# This server only listens on localhost:8080 and does not parse
-# user-supplied URLs. Revisit when upgrading to Go 1.25+.
-# Review by: 2026-07-08
-CVE-2026-25679

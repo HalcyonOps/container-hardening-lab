@@ -51,7 +51,7 @@ Follow the pattern established in the existing images. The minimum requirements 
 # Stage 1 — builder
 # Compile the Go binary. The Go toolchain never reaches the final image.
 # =============================================================================
-FROM golang:1.24-bookworm AS builder
+FROM golang:1.26-bookworm AS builder
 
 WORKDIR /build
 COPY go.mod go.sum ./
