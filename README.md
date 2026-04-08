@@ -80,13 +80,13 @@ Tests the Rego policy rules themselves using `opa test`, without needing Docker.
 make test-opa
 ```
 
-46 tests across three policies:
+47 tests across three policies:
 
 | Policy | Tests | What It Verifies |
 |---|---|---|
 | `no-root.rego` | 13 | Detects missing `USER`, `USER root`, `USER 0`, `USER 0:group` |
 | `no-privileged.rego` | 14 | Detects `RUN --privileged`, warns on ports < 1024 and `--chown=root` |
-| `image-source-allowlist.rego` | 19 | Approves/denies registries, warns on unpinned digests, covers multi-stage |
+| `image-source-allowlist.rego` | 20 | Approves/denies registries, warns on unpinned digests, covers multi-stage |
 
 ### 2. Kyverno Policy Tests — admission control
 
@@ -206,7 +206,7 @@ The GitHub Actions workflow (`.github/workflows/container-security.yml`) runs th
 flowchart TD
     trigger([push / pull_request]):::event --> pt
 
-    pt["**policy-tests**\nOPA unit tests — 46\nKyverno policy tests — 13\nFalco rule validation — 5 rules"]:::job
+    pt["**policy-tests**\nOPA unit tests — 47\nKyverno policy tests — 13\nFalco rule validation — 5 rules"]:::job
 
     pt --> fd
     pt --> ip

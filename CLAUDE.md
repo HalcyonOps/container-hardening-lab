@@ -14,7 +14,7 @@ make test
 make test-all
 
 # Individual test layers
-make test-opa          # 46 OPA/Rego unit tests
+make test-opa          # 47 OPA/Rego unit tests
 make test-kyverno      # 13 Kyverno admission policy tests
 make test-falco        # Falco rule syntax validation (requires Docker)
 

@@ -25,7 +25,7 @@ Install these tools before working on the project locally. The versions listed a
 These run fast and should be your first check after any change to a Dockerfile or policy file.
 
 ```bash
-# OPA unit tests (46 tests across 3 policies)
+# OPA unit tests (47 tests across 3 policies)
 make test-opa
 
 # Kyverno admission policy tests (13 tests)
@@ -160,7 +160,7 @@ Every pull request must pass all CI jobs before merging:
 
 | Job | What it checks |
 |---|---|
-| `policy-tests` | OPA unit tests (46) + Kyverno policy tests (13) + Falco rule validation (5 rules) |
+| `policy-tests` | OPA unit tests (47) + Kyverno policy tests (13) + Falco rule validation (5 rules) |
 | `failure-demo` | Conftest must reject `examples/unhardened/Dockerfile`; Trivy must find CVEs in `node:18` |
 | `image-pipeline (python)` | Lint → Build → Trivy scan (0 CRITICAL/HIGH) → SBOM → Structure tests (14) |
 | `image-pipeline (node)` | Lint → Build → Trivy scan (0 CRITICAL/HIGH) → SBOM → Structure tests (14) |

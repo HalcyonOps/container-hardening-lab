@@ -13,3 +13,15 @@ CVE-2023-45853
 # libc6 / libc-bin — glibc memalign integer overflow (no fix released for Debian 12
 # as of 2026-03-20). Not exposed over the network in this container.
 CVE-2026-0861
+
+# libncursesw6 / libtinfo6 / ncurses-base — buffer overflow in ncurses.
+# No fix released for Debian as of 2026-04-08. ncurses is a terminal
+# library; this container runs a headless Express server with no terminal
+# interaction, so the vulnerable code path is not reachable.
+CVE-2025-69720
+
+# libsystemd0 / libudev1 — arbitrary code execution / DoS in systemd.
+# No fix released for Debian as of 2026-04-08. libsystemd0 is pulled
+# in as a transitive dependency; the container does not use systemd
+# services or the journald API.
+CVE-2026-29111

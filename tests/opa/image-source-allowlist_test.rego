@@ -34,6 +34,10 @@ test_pass_nginx_alpine if {
     count(deny) == 0 with input as _dockerfile("nginx:1.27-alpine")
 }
 
+test_pass_golang if {
+    count(deny) == 0 with input as _dockerfile("golang:1.23-bookworm")
+}
+
 test_pass_debian if {
     count(deny) == 0 with input as _dockerfile("debian:bookworm-slim")
 }

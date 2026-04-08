@@ -34,7 +34,8 @@
 # sources are considered trusted for this project:
 #
 #   python, node, nginx,      — Docker Hub Official Images, maintained by Docker
-#   debian, ubuntu, alpine      and the upstream projects; vetted and signed
+#   golang, debian, ubuntu,     and the upstream projects; vetted and signed
+#   alpine
 #
 #   gcr.io/distroless          — Google's minimal base images; no shell, no pkg mgr
 #
@@ -68,6 +69,7 @@ approved_registries := {
     "python",
     "node",
     "nginx",
+    "golang",
     "debian",
     "ubuntu",
     "alpine",

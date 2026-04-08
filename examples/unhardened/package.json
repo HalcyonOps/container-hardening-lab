@@ -1,0 +1,9 @@
+{
+  "name": "unhardened-example",
+  "version": "1.0.0",
+  "description": "Deliberately insecure — used for failure demo only",
+  "main": "src/index.js",
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}
