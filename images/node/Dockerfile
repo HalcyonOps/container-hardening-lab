@@ -40,7 +40,11 @@ LABEL org.opencontainers.image.title="hardened-node" \
       org.opencontainers.image.base.name="node:20-slim"
 
 # --- CIS 4.7 / 4.8: Remove unnecessary packages, strip SUID/SGID bits -----
+# apt-get upgrade pulls in any package fixes Debian has released since this
+# base image was last rebuilt upstream (e.g. CVE-2026-33845/42010 in
+# libgnutls30, fixed in deb12u7 — not yet baked into node:20-slim itself).
 RUN apt-get update && \
+    apt-get upgrade -y && \
     apt-get remove --purge -y \
         wget \
         curl \
