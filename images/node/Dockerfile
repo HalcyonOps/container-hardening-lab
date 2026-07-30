@@ -53,10 +53,14 @@ RUN apt-get update && \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* \
     \
-    # perl-base provides /usr/bin/perl and cannot be cleanly removed via apt
-    # on Debian slim images (it is a dependency of apt itself). Delete the
-    # binary directly — the package entry remains but the attack surface is gone.
-    && rm -f /usr/bin/perl /usr/bin/perl5* \
+    # perl-base can't be removed via `apt remove` — other packages formally
+    # depend on it even though nothing at runtime actually calls perl. A plain
+    # `rm` of the binary leaves the package registered in dpkg, which is what
+    # CVE scanners (including Trivy) actually read, so the CVEs kept showing
+    # up regardless. Force-purge the dpkg record itself so the package is
+    # genuinely gone, not just its binary. Safe here because no further
+    # apt/dpkg operations happen later in this build.
+    && dpkg --purge --force-depends --force-remove-essential perl-base \
     \
     # CIS 4.8: Strip SUID/SGID bits from every binary in the image.
     # SUID binaries execute as their owner (typically root) regardless of the
