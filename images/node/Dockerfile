@@ -5,6 +5,11 @@
 # package manager, lock-file tooling, and devDependencies never appear in
 # the final image. Only the resulting node_modules and application source
 # are promoted to stage 2.
+#
+# Node 20 in both stages. Native addons compile against a specific module
+# ABI, so a builder on a different major produces a node_modules the runtime
+# cannot load. node:20-slim is paired with distroless nodejs20-debian13
+# deliberately.
 # =============================================================================
 FROM node:20-slim@sha256:2cf067cfed83d5ea958367df9f966191a942351a2df77d6f0193e162b5febfc0 AS builder
 
@@ -29,82 +34,49 @@ COPY . .
 # =============================================================================
 # Stage 2 — final
 #
-# Minimal runtime image. Contains only: node binary, application source,
-# production node_modules. No npm, no package manager, no build tooling.
+# Distroless: node binary, application source, production node_modules. No
+# shell, no npm, no package manager, no coreutils.
+#
+# This replaces a long list of hardening steps that are now unnecessary rather
+# than merely passing. The previous stage removed wget/curl/perl, force-purged
+# the perl-base dpkg record, stripped SUID/SGID bits, and deleted npm's bundled
+# node_modules. None of those packages exist in this base image, so the work is
+# gone rather than done. The CVE cluster that kept this red (util-linux family,
+# ncurses, gzip, zlib1g) went with them.
+#
+# Consequences of having no shell, all deliberate:
+#   - HEALTHCHECK must be exec-array form.
+#   - The runtime user is the image's built-in `nonroot` (65532), not the
+#     `appuser` (10001) the previous image created with useradd.
+#   - `node` is not on PATH. The binary lives at /nodejs/bin/node.
 # =============================================================================
-FROM node:20-slim@sha256:2cf067cfed83d5ea958367df9f966191a942351a2df77d6f0193e162b5febfc0 AS final
+FROM gcr.io/distroless/nodejs20-debian13:nonroot@sha256:c8da1b6cccb5c6cc4b8826c67353f31c5f7b2719c5517b1312d191b337d8bd99 AS final
 
 LABEL org.opencontainers.image.title="hardened-node" \
-      org.opencontainers.image.description="CIS-hardened Node.js 20 runtime" \
+      org.opencontainers.image.description="CIS-hardened Node.js 20 runtime on distroless" \
       org.opencontainers.image.vendor="container-hardening-lab" \
-      org.opencontainers.image.base.name="node:20-slim"
-
-# --- CIS 4.7 / 4.8: Remove unnecessary packages, strip SUID/SGID bits -----
-# apt-get upgrade pulls in any package fixes Debian has released since this
-# base image was last rebuilt upstream (e.g. CVE-2026-33845/42010 in
-# libgnutls30, fixed in deb12u7 — not yet baked into node:20-slim itself).
-RUN apt-get update && \
-    apt-get upgrade -y && \
-    apt-get remove --purge -y \
-        wget \
-        curl \
-        perl \
-    && apt-get autoremove -y \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/* \
-    \
-    # perl-base can't be removed via `apt remove` — other packages formally
-    # depend on it even though nothing at runtime actually calls perl. A plain
-    # `rm` of the binary leaves the package registered in dpkg, which is what
-    # CVE scanners (including Trivy) actually read, so the CVEs kept showing
-    # up regardless. Force-purge the dpkg record itself so the package is
-    # genuinely gone, not just its binary. Safe here because no further
-    # apt/dpkg operations happen later in this build.
-    && dpkg --purge --force-depends --force-remove-essential perl-base \
-    \
-    # CIS 4.8: Strip SUID/SGID bits from every binary in the image.
-    # SUID binaries execute as their owner (typically root) regardless of the
-    # calling user, enabling privilege escalation if the binary is exploitable.
-    && find / -xdev \( -perm /4000 -o -perm /2000 \) -exec chmod ug-s {} + 2>/dev/null || true \
-    \
-    # Remove npm and all of its bundled internal packages.
-    #
-    # npm ships its own copies of glob, minimatch, tar, cross-spawn, and others
-    # inside /usr/local/lib/node_modules/npm/node_modules/. These are separate
-    # from the application's node_modules and are not updated by npm update.
-    # They accumulate CVEs silently — 11 HIGH CVEs were present before this step.
-    #
-    # The application only needs the `node` binary at runtime; npm is a build
-    # tool. Removing it eliminates the entire CVE surface with zero functional
-    # impact on the running application.
-    && rm -rf /usr/local/lib/node_modules/npm \
-    && rm -f /usr/local/bin/npm /usr/local/bin/npx
-
-# --- CIS 4.1: Create a dedicated non-root user and group ------------------
-# UID/GID 10001 is above the range used by system accounts (0–999) and
-# typical application accounts (1000–9999), avoiding collisions.
-# --no-create-home: no /home/appuser for an attacker to write to
-# --shell /sbin/nologin: account cannot be used for interactive login
-RUN groupadd --gid 10001 appgroup && \
-    useradd --uid 10001 --gid appgroup --no-create-home --shell /sbin/nologin appuser
+      org.opencontainers.image.base.name="gcr.io/distroless/nodejs20-debian13:nonroot"
 
 WORKDIR /app
 
 # Copy only production artifacts from the builder — node_modules and source.
 # Nothing else from the builder (npm, package-lock.json, .npmrc) is included.
-COPY --from=builder --chown=appuser:appgroup /build/node_modules ./node_modules
-COPY --from=builder --chown=appuser:appgroup /build/src ./src
+COPY --from=builder --chown=nonroot:nonroot /build/node_modules ./node_modules
+COPY --from=builder --chown=nonroot:nonroot /build/src ./src
 
-# --- CIS 4.1: Drop to non-root user before runtime ------------------------
-USER appuser
+# --- CIS 4.1: Run as non-root ---------------------------------------------
+# Declared explicitly even though the base image already defaults to it, so the
+# guarantee is visible here and survives a base image change.
+USER nonroot
 
 # Non-privileged port — no CAP_NET_BIND_SERVICE required (CIS 5.7)
 EXPOSE 3000
 
 # Health check using Node's built-in http module — no curl/wget dependency.
-# Adjust the path to match your application's health endpoint.
+# Exec-array form: no shell exists to interpret a string command. The absolute
+# path is required because `node` is not on PATH in this base image.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD node -e "require('http').get('http://localhost:3000/healthz', (r) => process.exit(r.statusCode === 200 ? 0 : 1))"
+    CMD ["/nodejs/bin/node", "-e", "require('http').get('http://localhost:3000/healthz', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
 
-ENTRYPOINT ["node"]
+ENTRYPOINT ["/nodejs/bin/node"]
 CMD ["src/index.js"]

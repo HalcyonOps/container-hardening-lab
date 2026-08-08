@@ -103,11 +103,59 @@ The tradeoff: one more tool to install. For a single assertion, a `docker run` o
 
 ---
 
-## Base image selection — slim and alpine over full and distroless
+## Base image selection — distroless for Python, Node and Go; alpine for nginx
 
-**Python and Node:** `python:3.12-slim` and `node:20-slim` (Debian slim variants)
+> **Reversed 2026-08-08 for Python and Node.** This section previously chose
+> Debian slim over distroless for both. The reasoning is kept below because it
+> was sound in the abstract; it just didn't survive the CVE data. What follows
+> first is why it changed, then the original argument and which part of it was
+> wrong.
+>
+> The two images sat at 11 and 10 unfixable HIGH findings for months. Every one
+> was an OS package the runtime never calls: the `util-linux` family, `ncurses`,
+> `login`, `mount`, `gzip`. Debian had no fix released for any of them, so
+> patching was not available and the only remaining options were suppressing
+> them or removing the packages. Suppression was refused deliberately. Moving to
+> distroless removed the packages.
+>
+> Measured before and after, with the same Trivy version and each image's own
+> `.trivyignore`, counting only findings that reach the gate:
+>
+> | image | before | after |
+> |---|---|---|
+> | node | 10 (3 unique CVEs) | **1** (1 unique) |
+> | python, excluding the interpreter | 11 | **1** |
+> | python, total | 11 | 13 |
+>
+> The python total going *up* is the interesting part, and it isn't a
+> regression. `python:3.12-slim` compiles CPython from source into
+> `/usr/local`, so the interpreter has no dpkg record and Trivy's Debian
+> scanner never reported on it. `dpkg -l | grep python` returns nothing in that
+> image. Distroless uses Debian's `python3.13` packages, which are registered,
+> so the interpreter's own CVEs became visible for the first time — 3 unique,
+> reported across 4 packages. The old image was not safer, it was unmeasured.
+>
+> **The specific claim that was wrong** is the third bullet under "slim
+> variants" below: that multi-stage builds get close to distroless. They don't.
+> Multi-stage controls what the *build* adds. It has no effect on the packages
+> the base image already ships, and those were the entire problem.
+>
+> **What was given up, honestly.** The node image previously ran
+> `apt-get upgrade -y` to pick up Debian fixes released since the base was last
+> rebuilt upstream. Distroless has no package manager, so that lever is gone:
+> the one remaining node finding is `libssl3t64` CVE-2026-45447, which *does*
+> have a fix, and we now wait for Google to rebuild rather than applying it
+> ourselves. The trade is "I can patch ahead of upstream" for "there is far less
+> to patch." At 10 findings to 1 that trade is clearly worth it, but it is a
+> trade, not a free win.
+>
+> Debugging also genuinely gets worse, exactly as the original text warned. See
+> the notes on `docker cp` in each image's README.
+
+**Python and Node:** `gcr.io/distroless/python3-debian13` and
+`gcr.io/distroless/nodejs20-debian13`
 **nginx:** `nginx:1.27-alpine` (Alpine)
-**Evaluated:** Full images, distroless (`gcr.io/distroless/*`), Chainguard Images (`cgr.dev/chainguard/*`)
+**Evaluated:** Full images, Debian slim, Chainguard Images (`cgr.dev/chainguard/*`)
 
 **Full images** (e.g. `python:3.12`, `node:20`) include a complete Debian environment with package managers, compilers, and debugging tools. These are eliminated immediately — the goal is the opposite.
 
@@ -119,11 +167,11 @@ The tradeoff: one more tool to install. For a single assertion, a `docker run` o
 
 Distroless is used in [docs/adding-an-image.md](adding-an-image.md) as the recommended final stage for a statically compiled Go binary, where it is the natural fit.
 
-**slim variants** (Debian slim) were chosen for Python and Node because:
+**slim variants** (Debian slim) were chosen for Python and Node because, as of the original decision:
 
 - Application dependencies frequently require OS packages that distroless doesn't provide
 - The slim base allows `apt-get install` in the Dockerfile when genuinely needed
-- Multi-stage builds achieve a result close to distroless by stripping everything added by the build stage — the final image contains only what was explicitly copied
+- ~~Multi-stage builds achieve a result close to distroless by stripping everything added by the build stage — the final image contains only what was explicitly copied~~ **This is the claim that was wrong.** Multi-stage controls what the build adds. It does nothing about the packages the base already ships, and those accounted for every one of the 21 findings across the two images.
 
 **Alpine** was chosen for nginx because:
 

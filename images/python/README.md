@@ -1,7 +1,8 @@
 # hardened-python
 
-**Base image:** `python:3.12-slim`
-**Runtime user:** `appuser` (UID 10001)
+**Base image:** `gcr.io/distroless/python3-debian13:nonroot` (Python 3.13)
+**Builder:** `python:3.13-slim` (must match the runtime minor version)
+**Runtime user:** `nonroot` (UID 65532)
 **Exposed port:** 8000
 
 The reference implementation for the hardening pattern used throughout this lab. Every decision made here — multi-stage build, non-root user, SUID stripping, package removal — is documented with the CIS Docker Benchmark control it satisfies and the attack it mitigates.
@@ -84,6 +85,36 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 Without a `HEALTHCHECK`, Docker and Kubernetes cannot distinguish a running-but-deadlocked container from a healthy one. The health check uses Python's standard library — no `curl` or `wget` required, consistent with their removal.
 
 ---
+
+## Debugging without a shell
+
+This image is distroless. There is no `sh`, no `bash`, no coreutils, so
+`docker exec -it <container> sh` does not work and never will. That is the
+point: an attacker who gets code execution has the same nothing to work with.
+
+What to use instead:
+
+```bash
+# Pull files out of a running or stopped container
+docker cp <container>:/app/somefile ./somefile
+
+# Inspect the whole filesystem without running anything in it
+docker export <container> | tar -tv | less
+
+# Run the interpreter that is present, since it can do most of what you want
+docker run --rm --entrypoint /usr/bin/python3.13 <image> -c "import os; print(os.listdir('/app'))"
+```
+
+`docker debug`, or an ephemeral debug container sharing the process namespace,
+covers the rest:
+
+```bash
+docker run --rm -it --pid=container:<container> --network=container:<container> \
+    nicolaka/netshoot
+```
+
+If you need a shell in the image itself for a one-off investigation, build from
+the `:debug` distroless tag, which adds busybox. Do not ship it.
 
 ## CVE scan result
 
