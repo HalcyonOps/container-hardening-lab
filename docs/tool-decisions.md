@@ -19,6 +19,8 @@ Both are excellent open-source scanners with broad OS and language ecosystem cov
 | Secret scanning | Built-in (alongside CVE scan) | Separate tool |
 | `.trivyignore` suppression | Structured ignore file with expiry date support | Separate file format |
 
+> The suppression row is kept because it was part of the original comparison, but it is **not used**. This repo suppresses nothing; see [known-findings.md](known-findings.md). It is listed here as a Trivy capability, not as a practice.
+
 Trivy's broader scan scope (IaC, Kubernetes cluster scanning) makes it the natural choice if this lab expands into infrastructure scanning. The single-binary, multi-mode design also keeps the CI pipeline simpler — one tool, multiple scan types.
 
 Grype's advantage is its tight integration with Syft (same ecosystem) and arguably cleaner output formatting. It remains a strong choice and the decision could reasonably go either way.

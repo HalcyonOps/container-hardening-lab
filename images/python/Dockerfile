@@ -43,6 +43,18 @@ RUN mkdir -p /install/lib/python3.13/site-packages \
 # =============================================================================
 FROM gcr.io/distroless/python3-debian13:nonroot@sha256:1c680cdb442a9e7a89f64fd1706367c62302ea1f9ab80fdebdb72ae9fcded46f AS final
 
+# --- Known findings ------------------------------------------------------
+# This image reports 5 CVEs that have no Debian fix released: three in the
+# Python stdlib (tarfile extraction filters, html.parser, expat), one in
+# ncurses, one in libblkid via libuuid1. None are suppressed. `make scan` fails
+# while they are open, on purpose.
+#
+# Each is recorded in docs/known-findings.md with the evidence for why it isn't
+# urgent *for this reference application* and what would resolve it. Read that
+# before deriving from this image: the stdlib parser findings are properties of
+# the application, not of the image, and they apply at full severity to anything
+# built here that does parse untrusted XML, HTML, or tar archives.
+
 # --- OCI / CIS 4.1: Apply standard labels ---------------------------------
 LABEL org.opencontainers.image.title="hardened-python" \
       org.opencontainers.image.description="CIS-hardened Python 3.13 runtime on distroless" \

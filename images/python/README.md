@@ -117,6 +117,11 @@ If you need a shell in the image itself for a one-off investigation, build from
 the `:debug` distroless tag, which adds busybox. Do not ship it.
 
 ## CVE scan result
+> **No findings are suppressed.** There is no `.trivyignore` in this repo.
+> Everything the scanner reports is listed in [`docs/known-findings.md`](../../docs/known-findings.md)
+> with evidence and a resolution condition, and `make scan` fails while any of
+> them is open.
+
 
 ```
 hardened-python:latest — Trivy scan (CRITICAL, HIGH)

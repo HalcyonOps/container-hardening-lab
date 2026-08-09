@@ -52,6 +52,17 @@ COPY . .
 # =============================================================================
 FROM gcr.io/distroless/nodejs20-debian13:nonroot@sha256:c8da1b6cccb5c6cc4b8826c67353f31c5f7b2719c5517b1312d191b337d8bd99 AS final
 
+# --- Known findings ------------------------------------------------------
+# One CVE open: CVE-2026-45447 in libssl3t64. Unlike the python image's
+# findings, this one HAS a fix released (3.5.6-1~deb13u2) and it is not
+# reachable-by-argument away either, since it is OpenSSL in a network service.
+# It is unapplied only because distroless ships no package manager, so the image
+# cannot patch ahead of an upstream rebuild.
+#
+# Not suppressed. See docs/known-findings.md. If this is still open weeks from
+# now, the base image is not being rebuilt promptly, which is a reason to
+# reconsider the base rather than to keep waiting.
+
 LABEL org.opencontainers.image.title="hardened-node" \
       org.opencontainers.image.description="CIS-hardened Node.js 20 runtime on distroless" \
       org.opencontainers.image.vendor="container-hardening-lab" \
