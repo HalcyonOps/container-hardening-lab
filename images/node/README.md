@@ -1,7 +1,8 @@
 # hardened-node
 
-**Base image:** `node:20-slim`
-**Runtime user:** `appuser` (UID 10001)
+**Base image:** `gcr.io/distroless/nodejs20-debian13:nonroot` (Node 20)
+**Builder:** `node:20-slim` (must match the runtime major version)
+**Runtime user:** `nonroot` (UID 65532)
 **Exposed port:** 3000
 
 A hardened Node.js 20 runtime for Express-based APIs and background services. Follows the same pattern as [hardened-python](../python/README.md) with Node-specific considerations around npm's bundled package surface and supply-chain risk from install scripts.
@@ -105,7 +106,42 @@ Verified at runtime by structure tests:
 
 ---
 
+## Debugging without a shell
+
+This image is distroless. There is no `sh`, no `bash`, no coreutils, so
+`docker exec -it <container> sh` does not work and never will. That is the
+point: an attacker who gets code execution has the same nothing to work with.
+
+What to use instead:
+
+```bash
+# Pull files out of a running or stopped container
+docker cp <container>:/app/somefile ./somefile
+
+# Inspect the whole filesystem without running anything in it
+docker export <container> | tar -tv | less
+
+# Run the interpreter that is present, since it can do most of what you want
+docker run --rm --entrypoint /nodejs/bin/node <image> -e "console.log(require('fs').readdirSync('/app'))"
+```
+
+`docker debug`, or an ephemeral debug container sharing the process namespace,
+covers the rest:
+
+```bash
+docker run --rm -it --pid=container:<container> --network=container:<container> \
+    nicolaka/netshoot
+```
+
+If you need a shell in the image itself for a one-off investigation, build from
+the `:debug` distroless tag, which adds busybox. Do not ship it.
+
 ## CVE scan result
+> **No findings are suppressed.** There is no `.trivyignore` in this repo.
+> Everything the scanner reports is listed in [`docs/known-findings.md`](../../docs/known-findings.md)
+> with evidence and a resolution condition, and `make scan` fails while any of
+> them is open.
+
 
 ```
 hardened-node:latest — Trivy scan (CRITICAL, HIGH)

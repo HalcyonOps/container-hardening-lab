@@ -10,19 +10,43 @@
 # These tests validate the runtime properties of the final image layer —
 # not the Dockerfile instructions. They catch regressions where a hardening
 # step was accidentally removed or overridden.
+#
+# Distroless note: this image has no shell, no coreutils, no `id`, no `find`.
+# Every commandTest here therefore runs through the Python interpreter, which
+# is the only executable in the image. That's a feature: the interpreter can
+# report its own uid and sys.path, so the assertions are stronger than the
+# shell versions they replaced, not weaker.
+#
+# The one assertion that couldn't move here is the CIS 4.8 SUID/SGID sweep,
+# which needed `find`. It lives in scripts/check-suid.sh and runs from the host
+# as part of `make test-structure`. It was not dropped.
 
 schemaVersion: "2.0.0"
 
 # ---------------------------------------------------------------------------
-# Metadata tests: image-level properties
+# Metadata tests: image-level properties, read from the image config.
+# These need nothing to be executable, so they work identically on distroless.
 # ---------------------------------------------------------------------------
 metadataTest:
-  # CIS 4.1: image must declare a non-root user
-  user: "appuser"
-  # Only port 8000 should be exposed
+  # CIS 4.1: image must declare a non-root user. The distroless built-in
+  # `nonroot` (65532) replaces the `appuser` (10001) the Debian-based image
+  # created with useradd, which isn't possible without a shell.
+  user: "nonroot"
+  workdir: "/app"
   exposedPorts:
     - "8000"
-  # Labels must include OCI standard fields
+  # The entrypoint is the absolute interpreter path because there is no shell
+  # to resolve `python` from PATH.
+  entrypoint:
+    - "/usr/bin/python3.13"
+  # Runs the app that actually serves /healthz. This used to be
+  # `-m http.server 8000`, which has no /healthz, so the HEALTHCHECK could
+  # never pass. Asserted here so that regression can't return silently.
+  cmd:
+    - "main.py"
+  envVars:
+    - key: "PYTHONPATH"
+      value: "/app/site-packages"
   labels:
     - key: "org.opencontainers.image.title"
       value: "hardened-python"
@@ -30,101 +54,110 @@ metadataTest:
       value: "container-hardening-lab"
 
 # ---------------------------------------------------------------------------
-# Command tests: execute commands inside the container and check output
+# Command tests: everything runs via the interpreter, the only binary present.
 # ---------------------------------------------------------------------------
 commandTests:
 
-  # CIS 4.1: process must run as non-root UID
-  - name: "runtime user is non-root (UID 10001)"
-    command: "id"
+  # CIS 4.1: the process must actually run as non-root, not merely declare it.
+  # metadataTest above checks the declaration; this checks the result.
+  - name: "runtime user is non-root (UID 65532)"
+    command: "/usr/bin/python3.13"
+    args: ["-c", "import os,sys; sys.stdout.write(str(os.getuid()))"]
     expectedOutput:
-      - "uid=10001"
-      - "gid=10001"
+      - "^65532$"
     excludedOutput:
-      - "uid=0"
-
-  # CIS 4.8: no SUID binaries should remain
-  - name: "no SUID binaries present"
-    command: "sh"
-    args:
-      - "-c"
-      - "find / -xdev -perm /4000 2>/dev/null | wc -l | tr -d ' \n'"
-    expectedOutput:
       - "^0$"
 
-  # CIS 4.8: no SGID binaries should remain
-  - name: "no SGID binaries present"
-    command: "sh"
-    args:
-      - "-c"
-      - "find / -xdev -perm /2000 2>/dev/null | wc -l | tr -d ' \n'"
-    expectedOutput:
-      - "^0$"
-
-  # Python must be functional (it's the only runtime dependency)
-  - name: "python3 is executable"
-    command: "python3"
+  # The runtime must be the version the builder compiled wheels for. A mismatch
+  # here means compiled extensions won't import.
+  - name: "interpreter is Python 3.13"
+    command: "/usr/bin/python3.13"
     args: ["--version"]
     expectedOutput:
-      - "Python 3\\.12\\."
+      - "Python 3\\.13\\."
 
-  # pip must NOT be invokable at runtime — builder only
-  # (pip is present in slim, but we verify the builder stage didn't leak tools)
+  # Distroless Python has no site-packages on sys.path by default, so the
+  # dependency copy depends entirely on PYTHONPATH being set correctly. If this
+  # breaks, the image still builds and still starts, and only fails when an
+  # application imports a dependency. Asserted so it fails here instead.
+  - name: "dependency path is on sys.path"
+    command: "/usr/bin/python3.13"
+    args: ["-c", "import sys; sys.stdout.write(str('/app/site-packages' in sys.path))"]
+    expectedOutput:
+      - "^True$"
+
   - name: "working directory is /app"
-    command: "sh"
-    args: ["-c", "pwd | tr -d '\n'"]
+    command: "/usr/bin/python3.13"
+    args: ["-c", "import os,sys; sys.stdout.write(os.getcwd())"]
     expectedOutput:
       - "^/app$"
 
 # ---------------------------------------------------------------------------
-# File existence tests: attack-surface tools must be absent
+# File existence tests: attack surface must be absent. These read the image
+# filesystem directly and need no shell.
 # ---------------------------------------------------------------------------
 fileExistenceTests:
 
-  # CIS 4.7: wget removed
+  # The defining property of this base image. If a future change reintroduces a
+  # shell, most of the hardening argument above collapses, so assert it.
+  - name: "no shell present"
+    path: "/bin/sh"
+    shouldExist: false
+
+  - name: "no bash present"
+    path: "/bin/bash"
+    shouldExist: false
+
+  # CIS 4.7: package managers must not ship in a runtime image
+  - name: "pip is not present"
+    path: "/usr/bin/pip"
+    shouldExist: false
+
+  - name: "apt is not present"
+    path: "/usr/bin/apt"
+    shouldExist: false
+
+  # CIS 4.7: network tools removed
   - name: "wget is not present"
     path: "/usr/bin/wget"
     shouldExist: false
 
-  # CIS 4.7: curl removed
   - name: "curl is not present"
     path: "/usr/bin/curl"
     shouldExist: false
 
-  # CIS 4.7: gcc removed (no in-container compilation)
+  # CIS 4.7: no in-container compilation
   - name: "gcc is not present"
     path: "/usr/bin/gcc"
     shouldExist: false
 
-  # CIS 4.7: perl removed
   - name: "perl is not present"
     path: "/usr/bin/perl"
     shouldExist: false
 
-  # /app workdir must exist and be created
-  - name: "/app directory exists"
-    path: "/app"
+  # The application the CMD actually runs must be present
+  - name: "application source is present"
+    path: "/app/main.py"
     shouldExist: true
 
-  # /root home directory should not be used (appuser has no home)
   - name: "/root/.ssh does not exist"
     path: "/root/.ssh"
     shouldExist: false
 
 # ---------------------------------------------------------------------------
-# File content tests: validate configuration file content
+# File content tests
 # ---------------------------------------------------------------------------
 fileContentTests:
 
-  # The appuser shell must be a no-login shell (CIS 4.1)
-  - name: "appuser has nologin shell in /etc/passwd"
+  # CIS 4.1: the runtime account must not be usable for interactive login.
+  - name: "nonroot has a nologin shell in /etc/passwd"
     path: "/etc/passwd"
     expectedContents:
-      - "appuser:.*:/sbin/nologin"
+      - "nonroot:x:65532:65532:.*:/sbin/nologin"
 
-  # appuser must not appear in /etc/sudoers or sudoers.d
-  - name: "appuser not in sudoers"
-    path: "/etc/passwd"
-    # Verify appuser exists (indirect — sudoers check via command test is more reliable)
-    expectedContents:
-      - "appuser"
+  # A "no additional uid 0 account" assertion was attempted here and removed:
+  # container-structure-test compiles patterns with Go's RE2, which has no
+  # negative lookahead, so the rule could not be expressed and silently failed
+  # to compile rather than failing to match. The property it aimed at is
+  # already covered twice over, by the metadataTest user above and by the
+  # runtime uid command test, so it was dropped instead of approximated.

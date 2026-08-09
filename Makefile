@@ -206,7 +206,15 @@ test-structure:  ## Run container structure tests. Requires built images and con
 	    container-structure-test test \
 	        --image "$(IMAGE_PREFIX)-$$img:latest" \
 	        --config "$$cfg"; \
+	    echo "==> SUID/SGID check (CIS 4.8): $(IMAGE_PREFIX)-$$img:latest"; \
+	    ./scripts/check-suid.sh "$(IMAGE_PREFIX)-$$img:latest"; \
 	done
+
+# The SUID/SGID assertion runs here rather than inside the structure test
+# configs because it used to shell out to `find` inside the container, which
+# distroless images can't do. See the header of scripts/check-suid.sh. Keeping
+# it in this target means `make test-structure` still covers CIS 4.8 for every
+# image, including the two that no longer have a shell.
 
 # ---------------------------------------------------------------------------
 # clean

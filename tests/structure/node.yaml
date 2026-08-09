@@ -5,13 +5,28 @@
 #   container-structure-test test \
 #     --image hardened-node:latest \
 #     --config tests/structure/node.yaml
+#
+# Distroless note: this image has no shell, no coreutils, no `id`, no `find`.
+# Every commandTest runs through the node binary, the only executable present,
+# and node reports its own uid and cwd. The CIS 4.8 SUID/SGID sweep, which
+# needed `find`, moved to scripts/check-suid.sh and runs from the host as part
+# of `make test-structure`. It was not dropped.
 
 schemaVersion: "2.0.0"
 
 metadataTest:
-  user: "appuser"
+  # CIS 4.1: the distroless built-in `nonroot` (65532) replaces the `appuser`
+  # (10001) the Debian-based image created with useradd.
+  user: "nonroot"
+  workdir: "/app"
   exposedPorts:
     - "3000"
+  # Absolute path: `node` is not on PATH in this base image, and there is no
+  # shell to resolve it. A bare `node` entrypoint would fail to start.
+  entrypoint:
+    - "/nodejs/bin/node"
+  cmd:
+    - "src/index.js"
   labels:
     - key: "org.opencontainers.image.title"
       value: "hardened-node"
@@ -20,45 +35,57 @@ metadataTest:
 
 commandTests:
 
-  - name: "runtime user is non-root (UID 10001)"
-    command: "id"
+  # CIS 4.1: the process must actually run as non-root, not merely declare it.
+  - name: "runtime user is non-root (UID 65532)"
+    command: "/nodejs/bin/node"
+    args: ["-e", "process.stdout.write(String(process.getuid()))"]
     expectedOutput:
-      - "uid=10001"
-      - "gid=10001"
+      - "^65532$"
     excludedOutput:
-      - "uid=0"
-
-  - name: "no SUID binaries present"
-    command: "sh"
-    args: ["-c", "find / -xdev -perm /4000 2>/dev/null | wc -l | tr -d ' \n'"]
-    expectedOutput:
       - "^0$"
 
-  - name: "no SGID binaries present"
-    command: "sh"
-    args: ["-c", "find / -xdev -perm /2000 2>/dev/null | wc -l | tr -d ' \n'"]
-    expectedOutput:
-      - "^0$"
-
-  - name: "node is executable"
-    command: "node"
+  # Native addons compile against a specific module ABI, so the runtime major
+  # must match the builder's.
+  - name: "runtime is Node 20"
+    command: "/nodejs/bin/node"
     args: ["--version"]
     expectedOutput:
       - "^v20\\."
 
-  - name: "working directory is /app"
-    command: "sh"
-    args: ["-c", "pwd | tr -d '\n'"]
-    expectedOutput:
-      - "^/app$"
-
+  # Proves node_modules survived the copy and resolves from /app.
   - name: "express is importable"
-    command: "node"
+    command: "/nodejs/bin/node"
     args: ["-e", "require('express'); process.stdout.write('ok')"]
     expectedOutput:
       - "^ok$"
 
+  - name: "working directory is /app"
+    command: "/nodejs/bin/node"
+    args: ["-e", "process.stdout.write(process.cwd())"]
+    expectedOutput:
+      - "^/app$"
+
 fileExistenceTests:
+
+  # The defining property of this base image.
+  - name: "no shell present"
+    path: "/bin/sh"
+    shouldExist: false
+
+  - name: "no bash present"
+    path: "/bin/bash"
+    shouldExist: false
+
+  # npm bundles its own copies of glob, minimatch, tar and others, which
+  # accumulate CVEs independently of the application's node_modules. The
+  # previous image deleted them explicitly; this base never had them.
+  - name: "npm is not present"
+    path: "/usr/local/bin/npm"
+    shouldExist: false
+
+  - name: "npm bundled modules are not present"
+    path: "/usr/local/lib/node_modules/npm"
+    shouldExist: false
 
   - name: "wget is not present"
     path: "/usr/bin/wget"
@@ -86,7 +113,7 @@ fileExistenceTests:
 
 fileContentTests:
 
-  - name: "appuser has nologin shell"
+  - name: "nonroot has a nologin shell in /etc/passwd"
     path: "/etc/passwd"
     expectedContents:
-      - "appuser:.*:/sbin/nologin"
+      - "nonroot:x:65532:65532:.*:/sbin/nologin"

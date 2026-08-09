@@ -8,7 +8,7 @@ A portfolio project demonstrating production-grade container hardening, vulnerab
 
 This lab addresses the most common container security failures in production:
 
-- **Containers running as root** — every image in this repo uses a dedicated non-root user (UID 10001)
+- **Containers running as root** — every image in this repo runs as a non-root user (UID 10001 on the Debian-based images, 65532 on the distroless ones)
 - **Bloated attack surface** — multi-stage builds strip build tooling; `wget`, `curl`, `perl`, SUID/SGID binaries are explicitly removed; the Go image uses distroless (no shell, no package manager, no libc)
 - **Unpinned or untrusted base images** — an OPA allowlist enforces approved registries and warns on unpinned digests
 - **No admission control** — Kyverno ClusterPolicies block privileged pods, host namespace sharing, and missing capability drops at deploy time
@@ -21,8 +21,8 @@ This lab addresses the most common container security failures in production:
 ```
 .
 ├── images/
-│   ├── python/               # python:3.12-slim — reference hardened image
-│   ├── node/                 # node:20-slim — Express API
+│   ├── python/               # distroless python3-debian13 — reference hardened image
+│   ├── node/                 # distroless nodejs20-debian13 — Express API
 │   ├── nginx/                # nginx:1.27-alpine — static file server
 │   └── go/                   # distroless — statically compiled Go binary
 │
@@ -58,7 +58,7 @@ All images apply the following controls, mapped to CIS Docker Benchmark sections
 
 | CIS Control | What It Does | Implementation |
 |---|---|---|
-| **4.1** Non-root user | Prevent privilege escalation if container is compromised | Dedicated `appuser`/`nginx` (UID 10001/101); `USER` set before `CMD` |
+| **4.1** Non-root user | Prevent privilege escalation if container is compromised | `nonroot` (65532) on distroless python/node; `appuser`/`nginx` (10001/101) elsewhere; `USER` set before `CMD` |
 | **4.2** Trusted base images | Prevent supply-chain compromise via malicious base images | OPA allowlist policy; only official Docker Hub, GCR Distroless, Chainguard, Iron Bank, ECR permitted |
 | **4.4** Multi-stage builds | Strip build tooling from the final image | Builder stage installs deps; final stage copies only artifacts |
 | **4.7** Remove unnecessary packages | Reduce attack surface | `wget`, `curl`, `perl`, `gcc`, `binutils` removed; BusyBox applets removed by binary path |
@@ -130,8 +130,8 @@ make test-structure IMAGE=python   # or node, nginx, go
 
 | Image | Tests | Checks |
 |---|---|---|
-| `hardened-python` | 14 | UID 10001, no SUID/SGID, no wget/curl/perl/gcc, `/app` workdir, nologin shell, OCI labels |
-| `hardened-node` | 14 | UID 10001, no SUID/SGID, no wget/curl/perl, Express importable, `src/index.js` present, OCI labels |
+| `hardened-python` | 16 | UID 65532, no shell, no pip/apt, `/app` workdir, PYTHONPATH on sys.path, nologin shell, OCI labels. SUID/SGID checked by `scripts/check-suid.sh` |
+| `hardened-node` | 16 | UID 65532, no shell, no npm, Express importable, `src/index.js` present, OCI labels. SUID/SGID checked by `scripts/check-suid.sh` |
 | `hardened-nginx` | 13 | UID 101, no SUID/SGID, no wget/curl, `server_tokens off`, port 8080, security headers, OCI labels |
 | `hardened-go` | 12 | UID 65532, no shell/bash, no wget/curl/apt/apk/gcc/go, CA certs present, OCI labels (distroless) |
 
