@@ -140,10 +140,11 @@ about reachability. The binary being absent is a fact, and it's checkable.
 
 ### CVE-2026-14456 — OpenSSL QUIC listener memory exhaustion
 
-<!-- gate: cve=CVE-2026-14456 reviewed=2026-08-23 fix-available=none -->
+<!-- gate: cve=CVE-2026-14456 reviewed=2026-09-15 fix-available=2026-08-25 -->
 
 **Package:** `libssl3t64` (also present in hardened-node)
-**Fix:** none released; Debian marks the stable fix as postponed
+**Fix:** released 2026-08-25 via Debian DSA-6465-1 (`libssl3t64` 3.5.7-1~deb13u2);
+not yet pulled into either pinned base image
 
 An unauthenticated peer can exhaust memory in an OpenSSL QUIC server by sending
 valid Initial packets for many unknown connection IDs faster than the
@@ -152,11 +153,13 @@ application accepts them.
 **Why it isn't urgent here:** neither reference application is a QUIC server.
 The Python image runs a stdlib HTTP server and the Node image runs Express over
 HTTP. Neither creates an OpenSSL QUIC listener or passes packets to that API.
-As of the 2026-08-23 review, it is absent from CISA KEV and EPSS is 0.00465.
+As of the 2026-09-15 review, it is absent from CISA KEV and EPSS is 0.00729.
 
-**Resolved by:** a Debian/OpenSSL fix, or an application that does not expose
-the affected QUIC server path. Any derived image that adds QUIC must treat this
-as fully reachable and cannot inherit this assessment.
+**Resolved by:** rebuilding both base images once DSA-6465-1's fix reaches the
+pinned distroless digests. The fix-age clock is now running from 2026-08-25
+regardless of this reachability evidence — that's a deliberate property of the
+gate, not an oversight — so this entry must be revisited before day 30 or the
+gate will start blocking here.
 
 ---
 
