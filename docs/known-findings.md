@@ -51,7 +51,7 @@ treats every marked line as policy input.
 
 ## hardened-python
 
-16 findings, 9 unique CVEs. None have a fix released by Debian.
+21 findings, 11 unique CVEs. None have a fix released by Debian.
 
 `libpython3.13-minimal`/`-stdlib`/`python3.13-minimal`/`-venv` previously also
 carried CVE-2026-11940 (`tarfile.extractall()` filter bypass), and
@@ -87,34 +87,60 @@ above, this is a property of the application, not the image.
 **Resolved by:** a Debian fix, or an application that doesn't feed untrusted
 HTML to the stdlib parser.
 
-### CVE-2026-7210, CVE-2026-76956, CVE-2026-76957 — Expat hash flooding and memory corruption
+### CVE-2026-7210, CVE-2026-66046, CVE-2026-76956, CVE-2026-76957 — Expat hash flooding, quadratic-complexity DoS, and memory corruption
 
 <!-- gate: cve=CVE-2026-7210 reviewed=2026-09-15 fix-available=none -->
+<!-- gate: cve=CVE-2026-66046 reviewed=2026-09-15 fix-available=none -->
 <!-- gate: cve=CVE-2026-76956 reviewed=2026-09-15 fix-available=none -->
 <!-- gate: cve=CVE-2026-76957 reviewed=2026-09-15 fix-available=none -->
 
 **Packages:** CVE-2026-7210 hits the same four CPython packages above (CPython
-vendors its own copy of Expat for `pyexpat`); CVE-2026-76956 and
-CVE-2026-76957 hit `libexpat1` itself, the separate shared library (1 finding
-each). Three CVEs, two independent copies of the vulnerable code.
-**Fix:** none released for any of the three
+vendors its own copy of Expat for `pyexpat`); CVE-2026-66046, CVE-2026-76956,
+and CVE-2026-76957 hit `libexpat1` itself, the separate shared library (1
+finding each). Four CVEs, two independent copies of the vulnerable code.
+**Fix:** none released for any of the four
 
 CVE-2026-7210: `xml.parsers.expat` and `xml.etree.ElementTree` seed Expat's
 hash-flooding protection with insufficient entropy, so a crafted document can
-trigger collisions. CVE-2026-76956 is the same entropy-seeding defect in
-`libexpat1` proper. CVE-2026-76957 is a separate use-after-free: Expat before
-2.8.4 doesn't track handler call depth with custom encoding callbacks.
+trigger collisions. CVE-2026-66046 is a separate DoS: `storeAtts()` does an
+O(N^2) scan per non-normalized attribute, so a few-megabyte crafted document
+burns excessive CPU. CVE-2026-76956 is the same entropy-seeding defect as
+7210, in `libexpat1` proper. CVE-2026-76957 is a separate use-after-free:
+Expat before 2.8.4 doesn't track handler call depth with custom encoding
+callbacks.
 
 **Why it isn't urgent here:** the reference application parses no XML, in
 either the CPython-vendored copy or the shared library.
 
 **EPSS as of 2026-09-15:** 7210 not separately scored by first.org (tracked
-via the shared Debian advisory), 76956 0.00287, 76957 0.00107. None in CISA
-KEV.
+via the shared Debian advisory), 66046 0.00586, 76956 0.00287, 76957 0.00107.
+None in CISA KEV.
 
 **Resolved by:** libexpat 2.8.4 or later reaching both the CPython build and
 the system package. Applications that must parse untrusted XML should use
 `defusedxml` regardless of these CVEs.
+
+### CVE-2026-82049 — `tarfile` hardlink-to-symlink extraction filter bypass
+
+<!-- gate: cve=CVE-2026-82049 reviewed=2026-09-15 fix-available=none -->
+
+**Packages:** same four CPython packages
+**Fix:** none released
+
+A crafted archive containing a hard link to a symbolic link can make
+extraction modify permissions or mtimes outside the destination directory, or
+expose that file's contents inside the extracted tree — a bypass of the
+`data`/`tar` extraction filters distinct from CVE-2026-11940 (fixed above);
+this is a new filter gap published 2026-09-14, one day before this review.
+
+**Why it isn't urgent here:** the reference application (`app/main.py`) is an
+HTTP server that never imports `tarfile`. Same application-not-image caveat as
+every other stdlib-parser finding in this file: derive an application that
+extracts untrusted archives from this image, and this applies to you at full
+severity.
+
+**Resolved by:** a Debian fix for `python3.13`, or a base image rebuild
+carrying it.
 
 ### CVE-2026-76642, CVE-2026-78408, CVE-2026-78409, CVE-2026-78410 — util-linux privileged-mount and cgroup flaws
 

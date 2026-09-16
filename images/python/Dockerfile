@@ -44,9 +44,10 @@ RUN mkdir -p /install/lib/python3.13/site-packages \
 FROM gcr.io/distroless/python3-debian13:nonroot@sha256:8ee214843129f43e2ebf5e0ca9f2e4e6d8292143d1b8a6787f169b5898578884 AS final
 
 # --- Known findings ------------------------------------------------------
-# This image reports 9 CVEs that have no Debian fix released: two in the
-# Python stdlib (html.parser, expat), two more in libexpat1 directly, one in
-# ncurses, and four in util-linux/libuuid1. None are suppressed. `make scan`
+# This image reports 11 CVEs that have no Debian fix released: three in the
+# Python stdlib (html.parser, expat, tarfile), three more in libexpat1
+# directly, one in ncurses, and four in util-linux/libuuid1. None are
+# suppressed. `make scan`
 # evaluates each against the evidence policy in docs/known-findings.md.
 #
 # Each is recorded in docs/known-findings.md with the evidence for why it isn't
