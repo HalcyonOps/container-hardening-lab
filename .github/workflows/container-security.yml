@@ -187,6 +187,18 @@ jobs:
           category: trivy-${{ matrix.image }}
 
       # -----------------------------------------------------------------------
+      # OpenVEX generation — image facts only, generated in CI so it can't
+      # drift from the register. See docs/known-findings.md and
+      # scripts/generate_vex.py.
+      # -----------------------------------------------------------------------
+      - name: Generate OpenVEX document
+        run: make vex IMAGE=${{ matrix.image }}
+
+      - name: Verify VEX suppresses only the intended CVE
+        if: matrix.image == 'python'
+        run: ./scripts/verify-vex.sh reports/python/vex.json hardened-python:latest
+
+      # -----------------------------------------------------------------------
       # SBOM generation
       # -----------------------------------------------------------------------
       - name: Install Syft

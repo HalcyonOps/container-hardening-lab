@@ -45,12 +45,12 @@ SBOM_FORMATS   := cyclonedx-json spdx-json
 # ---------------------------------------------------------------------------
 # Phony targets
 # ---------------------------------------------------------------------------
-.PHONY: all build scan sbom lint test test-all test-opa test-kyverno test-vulnerability-gate test-falco test-structure clean help $(ALL_IMAGES)
+.PHONY: all build scan sbom vex visibility lint test test-all test-opa test-kyverno test-vulnerability-gate test-falco test-structure clean help $(ALL_IMAGES)
 
 # ---------------------------------------------------------------------------
 # all: full pipeline for every (or one) image
 # ---------------------------------------------------------------------------
-all: build scan sbom  ## Build, scan, and generate SBOMs for all images (or IMAGE=x)
+all: build scan sbom vex  ## Build, scan, generate SBOMs and VEX for all images (or IMAGE=x)
 
 # ---------------------------------------------------------------------------
 # build
@@ -106,6 +106,27 @@ sbom:  ## Generate SBOM (CycloneDX + SPDX) for all images. Use IMAGE=<name> for 
 	    echo "    CycloneDX: $(REPORTS_DIR)/$$img/sbom.cyclonedx.json"; \
 	    echo "    SPDX:      $(REPORTS_DIR)/$$img/sbom.spdx.json"; \
 	done
+
+# ---------------------------------------------------------------------------
+# vex: generate an OpenVEX document from the Trivy report + register
+# ---------------------------------------------------------------------------
+vex:  ## Generate an OpenVEX document. Requires `make scan` first. Use IMAGE=<name> for one.
+	@for img in $(TARGETS); do \
+	    echo ""; \
+	    echo "==> Generating VEX for $(IMAGE_PREFIX)-$$img:latest"; \
+	    python3 scripts/generate_vex.py \
+	        --register docs/known-findings.md \
+	        --trivy-report "$(REPORTS_DIR)/$$img/trivy.json" \
+	        --image "$(IMAGE_PREFIX)-$$img:latest" \
+	        --output "$(REPORTS_DIR)/$$img/vex.json"; \
+	done
+
+# ---------------------------------------------------------------------------
+# visibility: render the standing vulnerability report (requires `make scan`)
+# ---------------------------------------------------------------------------
+visibility:  ## Render the vulnerability visibility report. Requires `make scan` for all images first.
+	python3 scripts/vulnerability_visibility.py \
+	    --reports-dir $(REPORTS_DIR) --register docs/known-findings.md --markdown
 
 # ---------------------------------------------------------------------------
 # lint: OPA/Conftest policy check on Dockerfiles

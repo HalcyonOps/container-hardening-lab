@@ -9,6 +9,12 @@ finding below appears in full in `make scan` output on every run. The gate
 blocks a finding that is in CISA KEV, has EPSS above 0.1, has had a fix for at
 least 30 days, or has not been reviewed in 90 days. Missing evidence blocks.
 
+This register stays the reasoning — why each finding is treated the way it
+is. A daily [vulnerability visibility](../.github/workflows/vulnerability-visibility.yml)
+run reads it alongside live KEV/EPSS data and keeps a standing GitHub issue
+current with the count: every tracked CVE's distance from each threshold, not
+just whether it currently blocks. See `scripts/vulnerability_visibility.py`.
+
 ## Why a register instead of suppression
 
 A suppression and a register look similar and behave in opposite ways.
@@ -210,6 +216,11 @@ scanner output is evidence rather than a verdict.
 This one previously *was* suppressed, with the weaker reasoning "this container
 runs a headless HTTP server with no terminal interaction". That was a guess
 about reachability. The binary being absent is a fact, and it's checkable.
+
+This is the one finding in this file that's also VEXed: `scripts/generate_vex.py`
+re-checks the absence in CI on every run and `scripts/verify-vex.sh` proves the
+resulting document suppresses only this CVE. See `docs/tool-decisions.md` for
+why VEX is generated rather than hand-maintained.
 
 **Resolved by:** a Debian fix for ncurses, or dropping the `readline` dependency.
 
