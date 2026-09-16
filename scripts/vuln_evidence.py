@@ -106,17 +106,21 @@ def parse_register(text: str) -> dict[str, RegisterEntry]:
     return entries
 
 
-def parse_kev(payload: Any) -> set[str]:
+def parse_kev(payload: Any) -> dict[str, dt.date]:
     if not isinstance(payload, dict) or not isinstance(payload.get("vulnerabilities"), list):
         raise GateError("CISA KEV feed is missing a vulnerabilities list")
     if not payload["vulnerabilities"]:
         raise GateError("CISA KEV feed is empty")
 
-    kev: set[str] = set()
+    kev: dict[str, dt.date] = {}
     for item in payload["vulnerabilities"]:
         if not isinstance(item, dict) or not isinstance(item.get("cveID"), str):
             raise GateError("CISA KEV feed contains an invalid vulnerability")
-        kev.add(item["cveID"])
+        cve = item["cveID"]
+        date_added = item.get("dateAdded")
+        if not isinstance(date_added, str):
+            raise GateError(f"CISA KEV feed entry for {cve} is missing dateAdded")
+        kev[cve] = parse_date(date_added, "dateAdded", cve)
     return kev
 
 

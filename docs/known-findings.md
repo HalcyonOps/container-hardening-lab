@@ -6,8 +6,9 @@ would fix it.
 **There are no `.trivyignore` files in this repo, and adding one is a policy
 change rather than a maintenance decision.** Nothing is suppressed. Every
 finding below appears in full in `make scan` output on every run. The gate
-blocks a finding that is in CISA KEV, has EPSS above 0.1, has had a fix for at
-least 30 days, or has not been reviewed in 90 days. Missing evidence blocks.
+blocks a finding that has been in CISA KEV for at least 7 days, has EPSS above
+0.1, has had a fix for at least 30 days, or has not been reviewed in 90 days.
+Missing evidence blocks.
 
 This register stays the reasoning — why each finding is treated the way it
 is. A daily [vulnerability visibility](../.github/workflows/vulnerability-visibility.yml)

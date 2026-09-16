@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime as dt
 import sys
 import unittest
 from pathlib import Path
@@ -19,8 +20,14 @@ from vuln_evidence import (  # noqa: E402
 
 class ParseKevTests(unittest.TestCase):
     def test_valid_feed(self):
-        kev = parse_kev({"vulnerabilities": [{"cveID": "CVE-2020-0001"}]})
-        self.assertEqual({"CVE-2020-0001"}, kev)
+        kev = parse_kev(
+            {
+                "vulnerabilities": [
+                    {"cveID": "CVE-2020-0001", "dateAdded": "2026-01-01"}
+                ]
+            }
+        )
+        self.assertEqual({"CVE-2020-0001": dt.date(2026, 1, 1)}, kev)
 
     def test_missing_vulnerabilities_key_fails_closed(self):
         with self.assertRaisesRegex(GateError, "CISA KEV feed"):
@@ -33,6 +40,20 @@ class ParseKevTests(unittest.TestCase):
     def test_invalid_entry_fails_closed(self):
         with self.assertRaisesRegex(GateError, "invalid vulnerability"):
             parse_kev({"vulnerabilities": [{"cveID": 123}]})
+
+    def test_missing_date_added_fails_closed(self):
+        with self.assertRaisesRegex(GateError, "missing dateAdded"):
+            parse_kev({"vulnerabilities": [{"cveID": "CVE-2020-0001"}]})
+
+    def test_invalid_date_added_fails_closed(self):
+        with self.assertRaisesRegex(GateError, "invalid dateAdded"):
+            parse_kev(
+                {
+                    "vulnerabilities": [
+                        {"cveID": "CVE-2020-0001", "dateAdded": "not-a-date"}
+                    ]
+                }
+            )
 
 
 class ParseEpssTests(unittest.TestCase):

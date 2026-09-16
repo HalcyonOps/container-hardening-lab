@@ -141,8 +141,9 @@ gate: cve=CVE-YYYY-NNNNN reviewed=YYYY-MM-DD fix-available=none
 Wrap the completed line in an HTML comment. Placeholder lines must not use the
 gate comment marker because every marked line is parsed as policy input.
 
-The gate blocks CISA KEV findings, EPSS above 0.1, fixes available for at least
-30 days, and entries not reviewed in 90 days. Missing feeds or metadata block.
+The gate blocks CISA KEV findings present for at least 7 days, EPSS above 0.1,
+fixes available for at least 30 days, and entries not reviewed in 90 days.
+Missing feeds or metadata block.
 
 ---
 
