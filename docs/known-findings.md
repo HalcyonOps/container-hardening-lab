@@ -51,31 +51,25 @@ treats every marked line as policy input.
 
 ## hardened-python
 
-15 findings, 5 unique CVEs. None have a fix released by Debian.
+16 findings, 9 unique CVEs. None have a fix released by Debian.
 
-### CVE-2026-11940 — `tarfile.extractall()` filter bypass
-
-<!-- gate: cve=CVE-2026-11940 reviewed=2026-08-23 fix-available=none -->
-
-**Packages:** `libpython3.13-minimal`, `libpython3.13-stdlib`,
-`python3.13-minimal`, `python3.13-venv` (4 findings, one CVE)
-**Fix:** none released
-
-A crafted archive can bypass the `data` and `tar` extraction filters via a
-hardlink referencing a symlink stored deeper than the hardlink itself.
-
-**Why it isn't urgent here:** the reference application (`app/main.py`) is an
-HTTP server that never imports `tarfile`. It is reachable only if an application
-built on this image extracts archives it did not create.
-
-**Important for anyone deriving from this image:** that condition is about the
-*application*, not the image. If yours extracts uploaded or fetched tarballs,
-this finding applies to you at full severity and this entry does not transfer.
-This is precisely why it isn't suppressed — a suppression would have been
-inherited silently.
-
-**Resolved by:** a Debian fix for `python3.13`, or a base image rebuild carrying
-it.
+`libpython3.13-minimal`/`-stdlib`/`python3.13-minimal`/`-venv` previously also
+carried CVE-2026-11940 (`tarfile.extractall()` filter bypass), and
+`libssl3t64` carried CVE-2026-14456 (shared with hardened-node, below). Both
+were fixed upstream — Debian shipped `python3.13` 3.13.5-2+deb13u5 and
+`openssl` 3.5.7-1~deb13u2 — and both findings disappeared the moment the
+pinned distroless digest was bumped to pick them up
+(`sha256:8ee214843129f43e2ebf5e0ca9f2e4e6d8292143d1b8a6787f169b5898578884`,
+2026-09-15). Same for `libsqlite3-0`'s CVE-2026-11822/CVE-2026-11824: Debian
+fixed both in `sqlite3` 3.46.1-7+deb13u2 (uploaded 2026-07-14, confirmed via
+snapshot.debian.org), the same digest bump picked it up, and the finding is
+gone. This is the register working as intended: a real, dated fix landing
+removes the entry instead of it lingering as a stale exception. The bump was
+diffed package-by-package against the previous digest first — only
+`base-files`, `libc6`, `libc-bin`, `libcom-err2`, `tzdata`, `tzdata-legacy`,
+and the three fixed packages moved; `libuuid1`, `libexpat1`,
+`libncursesw6`/`libtinfo6` are byte-identical versions, so nothing below was
+introduced by the bump.
 
 ### CVE-2026-15308 — `html.parser` CPU denial of service
 
@@ -93,21 +87,76 @@ above, this is a property of the application, not the image.
 **Resolved by:** a Debian fix, or an application that doesn't feed untrusted
 HTML to the stdlib parser.
 
-### CVE-2026-7210 — `xml.parsers.expat` hash flooding
+### CVE-2026-7210, CVE-2026-76956, CVE-2026-76957 — Expat hash flooding and memory corruption
 
-<!-- gate: cve=CVE-2026-7210 reviewed=2026-08-23 fix-available=none -->
+<!-- gate: cve=CVE-2026-7210 reviewed=2026-09-15 fix-available=none -->
+<!-- gate: cve=CVE-2026-76956 reviewed=2026-09-15 fix-available=none -->
+<!-- gate: cve=CVE-2026-76957 reviewed=2026-09-15 fix-available=none -->
 
-**Packages:** same four
-**Fix:** none released
+**Packages:** CVE-2026-7210 hits the same four CPython packages above (CPython
+vendors its own copy of Expat for `pyexpat`); CVE-2026-76956 and
+CVE-2026-76957 hit `libexpat1` itself, the separate shared library (1 finding
+each). Three CVEs, two independent copies of the vulnerable code.
+**Fix:** none released for any of the three
 
-`xml.parsers.expat` and `xml.etree.ElementTree` seed Expat's hash-flooding
-protection with insufficient entropy, so a crafted document can trigger
-collisions.
+CVE-2026-7210: `xml.parsers.expat` and `xml.etree.ElementTree` seed Expat's
+hash-flooding protection with insufficient entropy, so a crafted document can
+trigger collisions. CVE-2026-76956 is the same entropy-seeding defect in
+`libexpat1` proper. CVE-2026-76957 is a separate use-after-free: Expat before
+2.8.4 doesn't track handler call depth with custom encoding callbacks.
 
-**Why it isn't urgent here:** the reference application parses no XML.
+**Why it isn't urgent here:** the reference application parses no XML, in
+either the CPython-vendored copy or the shared library.
 
-**Resolved by:** libexpat 2.8.0 or later reaching the base image. Applications
-that must parse untrusted XML should use `defusedxml` regardless of this CVE.
+**EPSS as of 2026-09-15:** 7210 not separately scored by first.org (tracked
+via the shared Debian advisory), 76956 0.00287, 76957 0.00107. None in CISA
+KEV.
+
+**Resolved by:** libexpat 2.8.4 or later reaching both the CPython build and
+the system package. Applications that must parse untrusted XML should use
+`defusedxml` regardless of these CVEs.
+
+### CVE-2026-76642, CVE-2026-78408, CVE-2026-78409, CVE-2026-78410 — util-linux privileged-mount and cgroup flaws
+
+<!-- gate: cve=CVE-2026-76642 reviewed=2026-09-15 fix-available=none -->
+<!-- gate: cve=CVE-2026-78408 reviewed=2026-09-15 fix-available=none -->
+<!-- gate: cve=CVE-2026-78409 reviewed=2026-09-15 fix-available=none -->
+<!-- gate: cve=CVE-2026-78410 reviewed=2026-09-15 fix-available=none -->
+
+**Package:** `libuuid1` (1 finding each, 4 findings)
+**Fix:** none released for any of the four
+
+All four are privilege-escalation flaws in the `util-linux` *programs*:
+CVE-2026-76642 lets a failed external mount helper's post-hooks still run
+privileged; CVE-2026-78408 lets `nsenter --join-cgroup` leak root's cgroup
+migration authority across an `execve()`; CVE-2026-78409 and CVE-2026-78410
+are `/etc/fstab` `X-mount.*` option flaws that escape a restricted bind mount
+via symlinks or an unpinned source. Every one of them requires the `mount`,
+`nsenter`, or an fstab-driven mount helper to actually run.
+
+**Why it isn't urgent here, with evidence:** this image ships none of the
+util-linux CLI tools — only `libuuid1`, the shared library CPython's `uuid`
+module links for `uuid.uuid1()`'s MAC-derived UUIDs:
+
+```
+$ tar tf <exported distroless-python filesystem> \
+    | grep -iE 'bin/(mount|nsenter|findmnt|umount|lsblk|blkid|swapon)'
+(no output)
+```
+
+Debian's `util-linux` source package builds the CLI tools and `libuuid1`
+together and tracks CVEs at the source-package level, so Trivy attributes
+these findings to the shared library even though none of the vulnerable code
+ships in it. There is also no `/etc/fstab` in this image and the container
+runs as non-root with no `CAP_SYS_ADMIN`, so the privileged-mount precondition
+doesn't hold even where the binaries would.
+
+**EPSS as of 2026-09-15:** 76642 0.00176, 78408 0.00113, 78409 0.00124, 78410
+0.00096. None in CISA KEV.
+
+**Resolved by:** a Debian fix landing in `libuuid1`, or dropping the
+dependency (would require patching CPython's `uuid` module out, not realistic
+for this image).
 
 ### CVE-2025-69720 — ncurses stack overflow in `infocmp`
 
@@ -138,37 +187,19 @@ about reachability. The binary being absent is a fact, and it's checkable.
 
 **Resolved by:** a Debian fix for ncurses, or dropping the `readline` dependency.
 
-### CVE-2026-14456 — OpenSSL QUIC listener memory exhaustion
-
-<!-- gate: cve=CVE-2026-14456 reviewed=2026-09-15 fix-available=2026-08-25 -->
-
-**Package:** `libssl3t64` (also present in hardened-node)
-**Fix:** released 2026-08-25 via Debian DSA-6465-1 (`libssl3t64` 3.5.7-1~deb13u2);
-not yet pulled into either pinned base image
-
-An unauthenticated peer can exhaust memory in an OpenSSL QUIC server by sending
-valid Initial packets for many unknown connection IDs faster than the
-application accepts them.
-
-**Why it isn't urgent here:** neither reference application is a QUIC server.
-The Python image runs a stdlib HTTP server and the Node image runs Express over
-HTTP. Neither creates an OpenSSL QUIC listener or passes packets to that API.
-As of the 2026-09-15 review, it is absent from CISA KEV and EPSS is 0.00729.
-
-**Resolved by:** rebuilding both base images once DSA-6465-1's fix reaches the
-pinned distroless digests. The fix-age clock is now running from 2026-08-25
-regardless of this reachability evidence — that's a deliberate property of the
-gate, not an oversight — so this entry must be revisited before day 30 or the
-gate will start blocking here.
-
 ---
 
 ## hardened-node
 
-1 finding, 1 unique CVE: CVE-2026-14456, documented above because it is shared
-with hardened-python. The Node 24 migration removed CVE-2026-45447, whose fix
-had been available since 2026-06-09 but never reached the Node 20 distroless
-image.
+No findings at CRITICAL or HIGH. It previously shared CVE-2026-14456 (OpenSSL
+QUIC listener memory exhaustion) with hardened-python — Debian shipped the fix
+in `openssl` 3.5.7-1~deb13u2 via DSA-6465-1 (2026-08-25), and it disappeared
+once the pinned `gcr.io/distroless/nodejs24-debian13:nonroot` digest was
+bumped to `sha256:bb6b03d81066993293a10feda7250e8e1cc034035fe9b61cfceededa7c8bf04d`
+(2026-09-15). Diffed against the previous digest first: only `base-files`,
+`libc6`, `tzdata`, `tzdata-legacy`, and `libssl3t64` moved. The Node 24
+migration separately removed CVE-2026-45447, whose fix had been available
+since 2026-06-09 but never reached the Node 20 distroless image.
 
 ---
 

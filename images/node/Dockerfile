@@ -50,12 +50,11 @@ COPY . .
 #     `appuser` (10001) the previous image created with useradd.
 #   - `node` is not on PATH. The binary lives at /nodejs/bin/node.
 # =============================================================================
-FROM gcr.io/distroless/nodejs24-debian13:nonroot@sha256:ffab599740d4aaa66029d02b9e6d3de4f622fefb7410081c5ef69c86430f364d AS final
+FROM gcr.io/distroless/nodejs24-debian13:nonroot@sha256:bb6b03d81066993293a10feda7250e8e1cc034035fe9b61cfceededa7c8bf04d AS final
 
 # --- Known findings ------------------------------------------------------
-# CVE-2026-14456 remains in libssl3t64 with no Debian fix. It affects OpenSSL's
-# QUIC server listener, which this HTTP reference app does not use. It is not
-# suppressed; see docs/known-findings.md for the gate evidence.
+# No CRITICAL or HIGH findings. CVE-2026-14456 (libssl3t64) is fixed as of
+# this digest; see docs/known-findings.md for the evidence trail.
 
 LABEL org.opencontainers.image.title="hardened-node" \
       org.opencontainers.image.description="CIS-hardened Node.js 24 runtime on distroless" \
